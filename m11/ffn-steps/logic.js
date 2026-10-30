@@ -84,7 +84,7 @@ export function zerosText(i, shift10) {
 export function captionText(stage, i) {
   const t = TOKENS[i];
   return {
-    input: "Вход - выход Multi-Head Attention из прошлого модуля: 3 токена по 4 числа. W₁ расширяет 4 → 8, W₂ сжимает 8 → 4.",
+    input: "На вход идёт выход Multi-Head Attention из прошлого модуля: 3 токена по 4 числа. W₁ расширяет 4 → 8, W₂ сжимает 8 → 4.",
     linear1: `Строка «${t}» умножается на каждый из 8 столбцов W₁: из 4 чисел получается 8.`,
     relu: "ReLU оставляет положительные числа и обнуляет отрицательные.",
     linear2: `Каждое число выхода «${t}» собрано из всех 8 чисел после ReLU.`,

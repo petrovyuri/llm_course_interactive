@@ -207,7 +207,7 @@
   "module": 11,
   "lesson": 3,
   "title": "FFN по шагам",
-  "about": "Пример FFN по шагам: Linear 1, ReLU со сдвигом bias и Linear 2, у каждой клетки свой расчёт."
+  "about": "Linear 1, ReLU со сдвигом bias и Linear 2 на примере модуля, у каждой клетки свой расчёт."
  },
  {
   "slug": "m11/token-wise",

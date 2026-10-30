@@ -75,5 +75,5 @@ export function neuronText(l, n) {
 }
 
 export function captionText(l, t) {
-  return `Сильно откликаются немногие нейроны: у «${TOKENS[t]}» в слое ${l} - ${stats(l, t).strong} из ${WIDTH}.`;
+  return `Сильно откликаются немногие нейроны: у «${TOKENS[t]}» в слое ${l} таких ${stats(l, t).strong} из ${WIDTH}.`;
 }
