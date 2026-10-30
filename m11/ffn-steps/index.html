@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FFN по шагам</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 4px; }
+[hidden] { display: none !important; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.work { display: grid; gap: 8px; }
+.tables { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; }
+.res { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+.res th { padding: 0 3px; font-weight: 400; color: var(--muted); }
+.res caption { caption-side: top; text-align: left; padding: 0 3px 1px; color: var(--cyan); font-size: 12px; white-space: nowrap; }
+.res td { min-width: 42px; padding: 2px 4px; text-align: right; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: default; }
+.res td button { all: unset; display: block; width: 100%; text-align: right; cursor: pointer; }
+.res td button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+.res.w { border-spacing: 2px; }
+.res.w td { min-width: 28px; padding: 1px 4px; }
+.res.w th { font-size: 11px; }
+.res tr.is-row td { border-color: var(--cyan); background: rgba(34, 211, 238, .12); }
+.res td.is-col { border-color: var(--purple); }
+.res td.is-cell { border-color: var(--yellow); color: var(--yellow); background: rgba(251, 191, 36, .12); }
+.res td.is-zero { color: var(--muted); opacity: .55; }
+.shapes { margin: 0; font-size: 13px; color: var(--muted); }
+.relu-box { display: grid; gap: 4px; }
+.relu-row { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: 12px; }
+.relu-row .lab { min-width: 64px; color: var(--muted); }
+.relu-row span.v { min-width: 50px; padding: 2px 4px; text-align: right; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.relu-row span.v.neg { color: var(--red); }
+.relu-row span.v.is-zero { color: var(--muted); opacity: .55; }
+#zeros, #relu-out { margin: 0; font-size: 13px; }
+.lines { min-width: 0; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.3; }
+.lines li { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 2px; }
+.lines li.is-now { color: var(--yellow); }
+.lines li.is-hidden { visibility: hidden; }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .res { border-spacing: 2px; font-size: 10.5px; }
+  .res td { min-width: 0; padding: 2px 2px; }
+  /* 8 чисел в ряд не влезают: строка токена - сетка 4 × 2, номера столбцов и имена строк скрыты */
+  .res.wide { display: block; }
+  .res.wide caption { display: block; }
+  .res.wide tbody { display: grid; gap: 4px; }
+  .res.wide tr { display: grid; grid-template-columns: repeat(4, max-content); gap: 2px; }
+  .res.wide tr:first-child, .res.wide th { display: none; }
+  .relu-row span.v { min-width: 0; padding: 2px 3px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 11 · уроки «Шаг 1» - «Сравнение»</p>
+<h1>FFN: вход → Linear 1 → ReLU → Linear 2 → выход</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="stages"></div>
+  <div class="row"><span class="muted-label">запрос:</span><span class="row" id="query"></span>
+    <button type="button" class="btn-play" id="play">▶ по шагам</button></div>
+</div>
+<div class="panel work">
+  <div class="tables mono" id="tables"></div>
+  <p class="shapes mono" id="shapes"></p>
+  <div class="relu-box" id="relu-box">
+    <div id="shift"></div>
+    <div class="relu-row mono" id="pre"></div>
+    <div class="relu-row mono" id="post"></div>
+    <p id="zeros"></p>
+    <p class="mono" id="relu-out"></p>
+  </div>
+  <ol class="lines mono" id="lines"></ol>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note" id="note">Числа после ReLU и произведения показаны с 4 знаками, а считаются по точным значениям, поэтому в последнем знаке возможна разница в несколько единиц.</p>
+
+<script type="module">
+import { STAGES, TOKENS, W1, W2, X, captionText, inter, interLine, matrixText, out, outLine, relu, reluView,
+  zerosText } from "./logic.js";
+import { el, presets, ready, slider, stepPlayer } from "../../kit/ui.js";
+
+const LABELS = { input: "вход", linear1: "Linear 1", relu: "ReLU", linear2: "Linear 2", result: "итог" };
+const params = new URLSearchParams(location.search);
+const state = {
+  stage: STAGES.includes(params.get("stage")) ? params.get("stage") : "input",
+  q: 0,          // токен-запрос
+  sel: 0,        // выбранная клетка строки (столбец Intermediate / Output)
+  step: -1,      // шаг «▶ по шагам», -1 - обычный вид
+  shift10: 0,    // сдвиг b₁ в десятых, только для вкладки ReLU
+};
+const $ = (id) => document.getElementById(id);
+const I = inter();
+const R = relu(I);
+const O = out(R);
+const sub = (name, n) => Array.from({ length: n }, (_, d) => `${name}${d + 1}`);
+const current = () => (state.step >= 0 ? state.step : state.sel);
+
+/** Таблица; rows - имена строк (null - без имён), mark(i, j) - класс клетки, onPick(i, j) - клик. */
+function table(title, cols, cells, { rows = TOKENS, row = state.q, mark = () => "", onPick = null, wide = false, kind = "" } = {}) {
+  return el("table", { class: `res${onPick ? " pick" : ""}${wide ? " wide" : ""}${kind ? ` ${kind}` : ""}` },
+    el("caption", {}, title),
+    el("tr", {}, el("th", {}), cols.map((c) => el("th", {}, c))),
+    ...cells.map((r, i) => el("tr", { class: rows && i === row ? "is-row" : "" },
+      el("th", {}, rows ? rows[i] : ""),
+      r.map((v, j) => el("td", { class: mark(i, j) },
+        onPick ? el("button", { type: "button", "aria-label": `${rows ? rows[i] : ""} ${cols[j]}: ${v}`, onclick: () => onPick(i, j) }, v) : v)))));
+}
+
+function pick(i, j) {
+  query.setActive(i);   // кнопка токена следует за строкой клетки
+  change(() => { state.q = i; state.sel = j; });
+}
+
+function tables() {
+  const cell = (i, j) => (i === state.q && j === current() ? "is-cell" : "");
+  if (state.stage === "input") {
+    return [table("X [3×4]", sub("x", 4), matrixText(X, 4), { row: -1 }),
+      table("W₁ [4×8]", sub("", 8), matrixText(W1, 1), { rows: null, kind: "w" }),
+      table("W₂ [8×4]", sub("", 4), matrixText(W2, 1), { rows: null, kind: "w" })];
+  }
+  if (state.stage === "linear1") {
+    return [table("X [3×4]", sub("x", 4), matrixText(X, 4)),
+      table("Intermediate [3×8]", sub("", 8), matrixText(I, 5), { mark: cell, onPick: pick, wide: true })];
+  }
+  if (state.stage === "relu") {
+    return [table("ReLU(Intermediate) [3×8]", sub("", 8), matrixText(R, 5), { wide: true })];
+  }
+  if (state.stage === "linear2") {
+    return [table("ReLU [3×8]", sub("", 8), matrixText(R, 5), { wide: true }),
+      table("Output [3×4]", sub("out", 4), matrixText(O, 6), { mark: cell, onPick: pick })];
+  }
+  return [table("вход X [3×4]", sub("x", 4), matrixText(X, 4)), table("выход [3×4]", sub("out", 4), matrixText(O, 6))];
+}
+
+function lines() {
+  if (state.stage === "linear1") return [0, 1, 2, 3, 4, 5, 6, 7].map((j) => interLine(state.q, j));
+  if (state.stage === "linear2") return [0, 1, 2, 3].map((j) => outLine(state.q, j));
+  return [];
+}
+
+function reluBox() {
+  const view = reluView(state.q, state.shift10);
+  const pre = inter(state.shift10)[state.q];
+  $("pre").replaceChildren(el("span", { class: "lab" }, "+ b₁"),
+    ...view.pre.map((v, k) => el("span", { class: `v${pre[k] < 0 ? " neg" : ""}` }, v)));
+  $("post").replaceChildren(el("span", { class: "lab" }, "ReLU"),
+    ...view.post.map((v, k) => el("span", { class: `v${pre[k] < 0 ? " is-zero" : ""}` }, v)));
+  $("zeros").textContent = zerosText(state.q, state.shift10);
+  const lesson = matrixText(O, 6)[state.q];
+  $("relu-out").textContent = state.shift10 === 0
+    ? `выход «${TOKENS[state.q]}»: [${view.out.join(", ")}] - как в уроке`
+    : `выход «${TOKENS[state.q]}»: [${view.out.join(", ")}], в уроке [${lesson.join(", ")}]`;
+}
+
+function render() {
+  const { stage } = state;
+  $("tables").replaceChildren(...tables());
+  $("shapes").hidden = stage !== "result";
+  $("shapes").textContent = "[3×4] → Linear 1 → [3×8] → ReLU → [3×8] → Linear 2 → [3×4]";
+  $("relu-box").hidden = stage !== "relu";
+  if (stage === "relu") reluBox();
+  const list = lines();
+  $("play").hidden = list.length === 0;
+  $("lines").hidden = list.length === 0;
+  $("lines").replaceChildren(...(list.length ? [el("li", { class: state.step >= 0 ? "is-now" : "" }, list[current()])] : []));
+  $("note").hidden = stage !== "linear1" && stage !== "linear2";
+  $("caption").textContent = captionText(stage, state.q);
+}
+
+const player = stepPlayer($("play"), {
+  steps: () => lines(),
+  onStep(i) {
+    state.step = i;
+    render();
+  },
+  interval: 900,
+});
+
+/** Любое изменение: сначала остановить проигрывание. */
+function change(update) {
+  player.stop();
+  update();
+  render();
+}
+
+presets($("stages"), STAGES.map((s) => ({ label: LABELS[s], value: s })), (v) => change(() => { state.stage = v; state.sel = 0; }))
+  .setActive(STAGES.indexOf(state.stage));
+const query = presets($("query"), TOKENS.map((t, i) => ({ label: t, value: i })), (i) => change(() => { state.q = i; }));
+query.setActive(0);
+slider($("shift"), { label: "сдвиг b₁", min: -10, max: 0, step: 1, value: 0, format: (v) => (v / 10).toFixed(1),
+  onInput: (v) => change(() => { state.shift10 = v; }) });
+render();
+ready();
+</script>
+</body>
+</html>

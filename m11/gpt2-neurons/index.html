@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Нейроны FFN настоящей GPT-2</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.shape { margin: 0 0 4px; font-size: 13px; color: var(--muted); }
+.map { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+#grid { display: block; border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; background: var(--bg); }
+.side h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+#top { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 12.5px; }
+#top button { width: 100%; padding: 2px 6px; font: inherit; text-align: left; color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer; white-space: nowrap; }
+#top button:hover, #top button.is-picked { border-color: var(--cyan); color: var(--cyan); }
+#stats { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
+#neuron { margin: 4px 0 0; font-size: 12.5px; min-height: 1.4em; color: var(--cyan); }
+.note { margin: 2px 0 0; font-size: 12.5px; }
+@media (max-width: 680px) {
+  .map { grid-template-columns: 1fr; }
+  #top { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 11 · урок «Архитектура Feed-Forward Network»</p>
+<h1>3072 нейрона FFN в GPT-2</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="muted-label">слово:</span><span class="row" id="token"></span></div>
+  <div id="layer"></div>
+</div>
+<div class="panel">
+  <p class="shape mono">768 → 3072 → 768: скрытый слой FFN в 4 раза шире, одна клетка - один нейрон</p>
+  <div class="map">
+    <canvas id="grid" aria-label="Активации 3072 нейронов: тёмные - около нуля, яркие - сильный отклик"></canvas>
+    <div class="side">
+      <h2>самые сильные</h2>
+      <ol class="mono" id="top"></ol>
+    </div>
+  </div>
+  <ul class="mono" id="stats"></ul>
+  <p class="mono" id="neuron"></p>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">В GPT-2 вместо ReLU стоит GELU: отрицательные числа он не обнуляет, а прижимает к нулю, не ниже -0.17.</p>
+
+<script type="module">
+import { LAYERS, TOKENS, WIDTH, captionText, isNegative, neuronText, row, statsText, top5, topText } from "./logic.js";
+import { el, presets, ready, slider } from "../../kit/ui.js";
+
+const COLS = 96;
+const ROWS = WIDTH / COLS;
+const state = { l: 5, t: 1, n: null };
+const $ = (id) => document.getElementById(id);
+const css = getComputedStyle(document.documentElement);
+const hex = (name) => css.getPropertyValue(name).trim().match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
+const [LOW, HIGH, MUTED, CYAN] = ["--panel-2", "--orange", "--muted", "--cyan"].map(hex);
+const canvas = $("grid");
+const ctx = canvas.getContext("2d");
+let cell = 5;
+
+function size() {
+  // в две колонки (шире 680 px) места под 5-пиксельные клетки хватает; в одну - клетка по ширине панели
+  const free = canvas.parentElement.clientWidth;
+  cell = innerWidth > 680 ? 5 : Math.max(2, Math.min(5, Math.floor((free - 2) / COLS)));
+  canvas.width = COLS * cell;
+  canvas.height = ROWS * cell;
+}
+
+function color(v, negative) {
+  if (negative) return `rgba(${MUTED.join(",")}, 0.28)`;
+  const k = Math.min(v, 3) / 3;
+  return `rgb(${LOW.map((a, i) => Math.round(a + (HIGH[i] - a) * k)).join(",")})`;
+}
+
+function draw() {
+  const values = row(state.l, state.t);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  values.forEach((v, n) => {
+    ctx.fillStyle = color(v, isNegative(state.l, state.t, n));
+    ctx.fillRect((n % COLS) * cell, Math.floor(n / COLS) * cell, cell, cell);
+  });
+  if (state.n !== null) {
+    ctx.strokeStyle = `rgb(${CYAN.join(",")})`;
+    ctx.lineWidth = 2;
+    const x = (state.n % COLS) * cell;
+    const y = Math.floor(state.n / COLS) * cell;
+    ctx.strokeRect(x - 2, y - 2, cell + 4, cell + 4);
+  }
+}
+
+function render() {
+  draw();
+  const best = top5(state.l, state.t);
+  $("top").replaceChildren(...topText(state.l, state.t).map((text, i) => el("li", {}, el("button", {
+    type: "button", class: best[i].n === state.n ? "is-picked" : "", onclick: () => pick(best[i].n),
+  }, text))));
+  $("stats").replaceChildren(...statsText(state.l, state.t).map((text) => el("li", {}, text)));
+  $("neuron").textContent = state.n === null ? "Нажмите на клетку или на номер в списке." : neuronText(state.l, state.n);
+  $("caption").textContent = captionText(state.l, state.t);
+}
+
+function pick(n) {
+  state.n = n;
+  render();
+}
+
+canvas.addEventListener("click", (e) => {
+  const box = canvas.getBoundingClientRect();
+  const col = Math.floor(((e.clientX - box.left) * canvas.width) / box.width / cell);
+  const r = Math.floor(((e.clientY - box.top) * canvas.height) / box.height / cell);
+  if (col >= 0 && col < COLS && r >= 0 && r < ROWS) pick(r * COLS + col);
+});
+presets($("token"), TOKENS.map((name, i) => ({ label: name, value: i })), (i) => { state.t = i; render(); }).setActive(state.t);
+slider($("layer"), { label: "слой", min: 0, max: LAYERS - 1, step: 1, value: state.l, format: (v) => String(v),
+  onInput: (v) => { state.l = v; render(); } });
+size();
+addEventListener("resize", () => { size(); draw(); });
+render();
+ready();
+</script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Каждый токен сам по себе</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.side { display: grid; gap: 6px; align-content: start; margin-bottom: 0; }
+.side h2 { margin: 0; font-size: 15px; }
+.side .sub { margin: 0; font-size: 12.5px; color: var(--muted); }
+.flag { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.rows { display: grid; gap: 6px; }
+.rows .row { display: grid; gap: 3px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.rows .row.is-token { border-color: var(--cyan); }
+.vals { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12.5px; }
+.vals b { min-width: 42px; font-weight: 600; }
+.bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--orange); }
+.change { font-size: 12.5px; color: var(--muted); }
+.change.is-changed { color: var(--orange); }
+@media (max-width: 560px) {
+  .pair { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 11 · урок «Зачем нужен Feed-Forward Network?»</p>
+<h1>Attention и FFN: кого задевает изменение</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="muted-label">меняем строку:</span><span class="row" id="token"></span></div>
+  <div id="delta"></div>
+</div>
+<div class="pair">
+  <div class="panel side" id="attn">
+    <h2>Attention</h2>
+    <p class="sub">модуль 10: токены смотрят друг на друга</p>
+    <label class="flag"><input type="checkbox" id="mask"> каузальная маска</label>
+    <div class="rows mono" id="attn-rows"></div>
+  </div>
+  <div class="panel side" id="ffn">
+    <h2>FFN</h2>
+    <p class="sub">модуль 11: каждый токен отдельно</p>
+    <div class="rows mono" id="ffn-rows"></div>
+  </div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { TOKENS, attnOut, captionText, changeText, deltas, ffnOut } from "./logic.js";
+import { fixed } from "../../kit/format.js";
+import { el, presets, ready, slider } from "../../kit/ui.js";
+
+const state = { t: 1, d10: 3, mask: false };
+const $ = (id) => document.getElementById(id);
+
+function rows(kind) {
+  const { t, d10, mask } = state;
+  const out = kind === "ffn" ? ffnOut(t, d10) : attnOut(t, d10, mask);
+  const d = deltas(kind, t, d10, mask);
+  const scale = Math.max(...deltas("ffn", t, d10, mask), ...deltas("attn", t, d10, mask));
+  const text = changeText(kind, t, d10, mask);
+  return out.map((row, i) => el("div", { class: `row${i === t ? " is-token" : ""}` },
+    el("div", { class: "vals" }, el("b", {}, TOKENS[i]), ...row.map((v) => el("span", {}, fixed(v, 4)))),
+    el("div", { class: "bar" }, el("span", { style: `width: ${scale > 0 ? (100 * d[i]) / scale : 0}%` })),
+    el("div", { class: `change${text[i] === "не изменилась" ? "" : " is-changed"}` }, text[i])));
+}
+
+function render() {
+  $("attn-rows").replaceChildren(...rows("attn"));
+  $("ffn-rows").replaceChildren(...rows("ffn"));
+  $("caption").textContent = captionText(state.t, state.d10, state.mask);
+}
+
+presets($("token"), TOKENS.map((name, i) => ({ label: name, value: i })), (i) => { state.t = i; render(); }).setActive(state.t);
+slider($("delta"), { label: "δ к четырём числам строки", min: -5, max: 5, step: 1, value: state.d10,
+  format: (v) => (v > 0 ? `+${(v / 10).toFixed(1)}` : (v / 10).toFixed(1)), onInput: (v) => { state.d10 = v; render(); } });
+$("mask").addEventListener("change", (e) => { state.mask = e.target.checked; render(); });
+render();
+ready();
+</script>
+</body>
+</html>
