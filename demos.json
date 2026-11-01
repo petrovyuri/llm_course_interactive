@@ -201,5 +201,40 @@
   "lesson": 3,
   "title": "Размеры и параметры",
   "about": "head_dim и число параметров при разных embed_dim и num_heads."
+ },
+ {
+  "slug": "m11/ffn-steps",
+  "module": 11,
+  "lesson": 3,
+  "title": "FFN по шагам",
+  "about": "Linear 1, ReLU со сдвигом bias и Linear 2 на примере модуля, у каждой клетки свой расчёт."
+ },
+ {
+  "slug": "m11/token-wise",
+  "module": 11,
+  "lesson": 1,
+  "title": "Каждый токен сам по себе",
+  "about": "Измените одно слово: у Attention меняются все строки выхода, у FFN только строка этого слова."
+ },
+ {
+  "slug": "m11/gpt2-neurons",
+  "module": 11,
+  "lesson": 2,
+  "title": "Нейроны FFN настоящей GPT-2",
+  "about": "3072 нейрона скрытого слоя GPT-2 на фразе «The cat loved sour cream»: сильно откликаются немногие."
+ },
+ {
+  "slug": "m11/ffn-params",
+  "module": 11,
+  "lesson": 2,
+  "title": "Параметры FFN и Attention",
+  "about": "Сколько параметров у FFN и у Attention: пример, наша модель, GPT-2 и GPT-3 по формулам курса."
+ },
+ {
+  "slug": "m11/relu-curve",
+  "module": 11,
+  "lesson": 5,
+  "title": "Из прямых - ломаная",
+  "about": "Нейроны с ReLU складывают ломаную: больше нейронов - точнее форма, а без ReLU всегда выходит прямая."
  }
 ]

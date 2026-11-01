@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Параметры FFN и Attention</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 8px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+[hidden] { display: none !important; }
+.fields { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; }
+.fields label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.fields input[type="text"] { width: 76px; padding: 4px 6px; font-size: 14px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; }
+.fields input.is-invalid { border-color: var(--red); color: var(--red); }
+.sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+.bar { display: flex; height: 26px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.bar span { min-width: max-content; padding: 0 4px; display: grid; place-items: center; font-size: 12px; color: var(--bg); overflow: hidden; white-space: nowrap; }
+.bar .ffn { background: var(--orange); }
+.bar .attn { background: var(--cyan); }
+.legend { display: flex; gap: 14px; margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
+.out { display: grid; gap: 3px; margin: 6px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+#bias { color: var(--muted); }
+#share { color: var(--orange); }
+@media (max-width: 520px) {
+  .sliders { grid-template-columns: 1fr; }
+  .out { font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 11 · уроки «Архитектура», «Сравнение» и «Код»</p>
+<h1>Сколько параметров у FFN</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="presets"></div>
+  <div class="fields mono">
+    <label>embed_dim <input id="dim" type="text" inputmode="numeric" autocomplete="off"></label>
+    <label><input id="show-bias" type="checkbox"> с bias, как в коде</label>
+  </div>
+  <div class="sliders"><div id="mult"></div><div id="blocks"></div></div>
+</div>
+<div class="panel">
+  <div class="bar mono" id="bar" aria-label="Доли FFN и Attention в блоке"></div>
+  <p class="legend"><span><i style="background: var(--orange)"></i>FFN</span><span><i style="background: var(--cyan)"></i>Attention</span></p>
+  <div class="out mono">
+    <span id="ffn"></span>
+    <span id="bias"></span>
+    <span id="attn"></span>
+    <span id="share"></span>
+    <span id="total"></span>
+  </div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { PARSE, PRESETS, attnText, biasText, captionText, ffnText, parseDim, share, shareText, totalText } from "./logic.js";
+import { el, presets, ready, slider } from "../../kit/ui.js";
+import { fixed } from "../../kit/format.js";
+
+const $ = (id) => document.getElementById(id);
+const asked = new URLSearchParams(location.search).get("preset");
+const start = Math.max(0, PRESETS.findIndex((p) => p.key === (asked === "code" ? "model" : asked ?? "model")));
+const state = { ...PRESETS[start], bias: asked === "code", bad: false };
+
+function render() {
+  const { d, k, blocks, bias } = state;
+  $("dim").classList.toggle("is-invalid", state.bad);
+  const s = share(d, k, bias);
+  $("bar").replaceChildren(
+    el("span", { class: "ffn", style: `flex: ${s} 1 0` }, `${fixed(100 * s, 1)}%`),
+    el("span", { class: "attn", style: `flex: ${1 - s} 1 0` }, `${fixed(100 * (1 - s), 1)}%`));
+  $("ffn").textContent = ffnText(d, k);
+  $("bias").textContent = biasText(d, k);
+  $("bias").hidden = !bias;
+  $("attn").textContent = attnText(d);
+  $("share").textContent = shareText(d, k, bias);
+  $("total").textContent = totalText(d, k, blocks);
+  $("total").hidden = blocks === 1;
+  $("caption").textContent = state.bad ? PARSE : captionText(d, k);
+}
+
+const mult = slider($("mult"), { label: "ff_dim = k × embed_dim", min: 1, max: 8, step: 1, value: state.k,
+  format: (v) => `k = ${v}, ff_dim = ${v * state.d}`, onInput: (v) => { state.k = v; render(); } });
+const blocks = slider($("blocks"), { label: "блоков", min: 1, max: 96, step: 1, value: state.blocks,
+  onInput: (v) => { state.blocks = v; render(); } });
+
+function fill(p) {
+  Object.assign(state, { d: p.d, k: p.k, blocks: p.blocks, bad: false });
+  $("dim").value = String(p.d);
+  mult.set(p.k);
+  blocks.set(p.blocks);
+}
+
+presets($("presets"), PRESETS.map((p) => ({ label: p.label, value: p })), (p) => { fill(p); render(); }).setActive(start);
+$("dim").addEventListener("input", () => {
+  const v = parseDim($("dim").value);
+  state.bad = v === null;
+  if (v !== null) {
+    state.d = v;
+    mult.set(state.k);   // подпись ff_dim зависит от embed_dim
+  }
+  render();
+});
+$("show-bias").checked = state.bias;
+$("show-bias").addEventListener("change", (e) => { state.bias = e.target.checked; render(); });
+fill(PRESETS[start]);
+render();
+ready();
+</script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Из прямых - ломаная</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.controls { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: end; }
+.flag { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; padding-bottom: 4px; }
+#plot { display: block; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 0; margin-right: 5px; vertical-align: 3px; border-top: 2px solid; }
+#error { margin: 4px 0 0; font-size: 13px; }
+@media (max-width: 520px) {
+  .controls { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 11 · урок «Функция активации ReLU»</p>
+<h1>Из прямых - ломаная: что умеют нейроны с ReLU</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="targets"></div>
+  <div class="controls">
+    <div id="neurons"></div>
+    <label class="flag"><input type="checkbox" id="no-relu"> без ReLU</label>
+  </div>
+</div>
+<div class="panel">
+  <svg id="plot" viewBox="0 0 640 250" role="img" aria-label="Цель, выход сети и вклады нейронов на отрезке от -1 до 1"></svg>
+  <p class="legend"><span><i style="border-color: var(--muted); border-top-style: dashed"></i>цель</span>
+    <span><i style="border-color: var(--cyan)"></i>выход сети</span>
+    <span><i style="border-color: var(--purple)"></i>вклад одного нейрона</span></p>
+  <p class="mono" id="error"></p>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { TARGETS, XS, captionText, curve, errorText, net, piece, target, weights } from "./logic.js";
+import { presets, ready, slider, svg } from "../../kit/ui.js";
+
+const W = 640;
+const H = 250;
+const PAD = 14;
+const RANGE = { abs: [-0.25, 1.25], hill: [-0.25, 1.25], wave: [-1.25, 1.25] };   // ось y для каждой цели
+const state = { key: "abs", n: 3, relu: true };
+const $ = (id) => document.getElementById(id);
+const plot = $("plot");
+
+const sx = (x) => PAD + ((x + 1) / 2) * (W - 2 * PAD);
+function sy(y) {
+  const [lo, hi] = RANGE[state.key];
+  return H - PAD - ((y - lo) / (hi - lo)) * (H - 2 * PAD);
+}
+const points = (ys) => XS.map((x, j) => `${sx(x).toFixed(1)},${sy(ys[j]).toFixed(1)}`).join(" ");
+
+function render() {
+  const { key, n, relu } = state;
+  const w = weights(key, n);
+  const nodes = [
+    svg("defs"),
+    svg("rect", { x: PAD, y: PAD, width: W - 2 * PAD, height: H - 2 * PAD, fill: "none", stroke: "var(--line)" }),
+    svg("line", { x1: PAD, x2: W - PAD, y1: sy(0), y2: sy(0), stroke: "var(--line)" }),
+    svg("line", { x1: sx(0), x2: sx(0), y1: PAD, y2: H - PAD, stroke: "var(--line)" }),
+  ];
+  const clip = svg("clipPath", { id: "frame" });
+  clip.append(svg("rect", { x: PAD, y: PAD, width: W - 2 * PAD, height: H - 2 * PAD }));
+  nodes[0].append(clip);
+  const inside = svg("g", { "clip-path": "url(#frame)" });
+  if (relu) {
+    for (let i = 0; i < n; i += 1) {
+      inside.append(svg("polyline", { points: points(piece(key, n, i)), fill: "none", stroke: "var(--purple)", "stroke-width": 1.2, opacity: 0.45 }));
+    }
+  }
+  inside.append(svg("polyline", { points: points(XS.map((x) => target(key, x))), fill: "none", stroke: "var(--muted)", "stroke-width": 2, "stroke-dasharray": "6 5" }));
+  inside.append(svg("polyline", { points: points(curve(key, n, relu)), fill: "none", stroke: "var(--cyan)", "stroke-width": 2.5 }));
+  if (relu) {
+    for (let i = 0; i < n; i += 1) {
+      const x = -w.b1[i];
+      inside.append(svg("circle", { cx: sx(x), cy: sy(net(key, n, x, true)), r: 4, fill: "var(--yellow)" }));
+    }
+  }
+  plot.replaceChildren(...nodes, inside);
+  $("error").textContent = errorText(key, n, relu);
+  $("caption").textContent = captionText(key, n, relu);
+}
+
+presets($("targets"), TARGETS.map((t) => ({ label: t.label, value: t.key })), (k) => { state.key = k; render(); }).setActive(0);
+slider($("neurons"), { label: "нейронов в скрытом слое", min: 0, max: 8, step: 1, value: state.n,
+  onInput: (v) => { state.n = v; render(); } });
+$("no-relu").addEventListener("change", (e) => { state.relu = !e.target.checked; render(); });
+render();
+ready();
+</script>
+</body>
+</html>
