@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как блоки GPT-2 уточняют прогноз</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.prompt { margin: 0 0 6px; font-size: 15px; }
+.prompt .q { color: var(--yellow); }
+.bars { display: grid; grid-template-columns: minmax(70px, max-content) minmax(80px, 1fr) max-content; gap: 3px 8px; align-items: center; font-size: 13px; }
+.bars .w { white-space: pre; }
+.bars .bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.bars .bar span { display: block; height: 100%; background: var(--purple); transition: width .25s; }
+.bars .is-top { color: var(--yellow); }
+.bars .bar.is-top span { background: var(--yellow); }
+.bars .is-cream { color: var(--cyan); }
+.bars .bar.is-cream span { background: var(--cyan); }
+#cream { margin: 6px 0 0; font-size: 13.5px; color: var(--cyan); }
+.chart-title { margin: 0 0 2px; font-size: 12.5px; color: var(--muted); }
+#chart { display: block; width: 100%; height: auto; max-height: 105px; }
+#chart text { font: 10px ui-monospace, Consolas, monospace; fill: var(--muted); }
+#chart .grid { stroke: var(--line); stroke-width: 1; }
+#chart .path { fill: none; stroke: var(--cyan); stroke-width: 2; }
+#chart .dot { fill: var(--panel); stroke: var(--cyan); stroke-width: 1.5; }
+#chart .dot.is-now { fill: var(--yellow); stroke: var(--yellow); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 12 · урок 12.2</p>
+<h1>Как блоки GPT-2 уточняют прогноз</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel">
+  <p class="prompt mono">The cat loved sour <span class="q">→ ?</span></p>
+  <div id="layer"></div>
+</div>
+<div class="panel">
+  <div class="bars mono" id="bars"></div>
+  <p class="mono" id="cream"></p>
+</div>
+<div class="panel">
+  <p class="chart-title">место «·cream» после каждого блока (шкала логарифмическая)</p>
+  <svg id="chart" viewBox="0 0 320 100" role="img" aria-label="место слова cream в прогнозе после каждого блока"></svg>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">«·» - пробел перед словом: у GPT-2 « cream» и «cream» - разные токены. К выходу каждого блока применяются финальная LayerNorm и выходной слой, как будто блок последний (приём logit lens).</p>
+
+<script type="module">
+import { CREAM, LAYERS } from "./data.js";
+import { captionText, creamText, topRows } from "./logic.js";
+import { el, ready, slider, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { layer: 0 };
+const X0 = 34, X1 = 312, Y0 = 8, Y1 = 78;
+const maxLog = Math.ceil(Math.log10(Math.max(...CREAM.map((c) => c.rank))));
+const px = (l) => X0 + ((X1 - X0) * l) / (LAYERS - 1);
+const py = (rank) => Y0 + ((Y1 - Y0) * Math.log10(rank)) / maxLog;
+
+function drawChart() {
+  const chart = $("chart");
+  const parts = [];
+  for (let k = 0; k <= maxLog; k++) {
+    parts.push(svg("line", { class: "grid", x1: X0, x2: X1, y1: py(10 ** k), y2: py(10 ** k) }));
+    const t = svg("text", { x: X0 - 4, y: py(10 ** k) + 3, "text-anchor": "end" });
+    t.textContent = String(10 ** k);
+    parts.push(t);
+  }
+  for (let l = 0; l < LAYERS; l += 2) {
+    const t = svg("text", { x: px(l), y: 94, "text-anchor": "middle" });
+    t.textContent = String(l);
+    parts.push(t);
+  }
+  parts.push(svg("polyline", { class: "path", points: CREAM.map((c, l) => `${px(l)},${py(c.rank)}`).join(" ") }));
+  CREAM.forEach((c, l) => parts.push(svg("circle", { class: `dot${l === state.layer ? " is-now" : ""}`, cx: px(l), cy: py(c.rank), r: l === state.layer ? 4.5 : 3 })));
+  chart.replaceChildren(...parts);
+}
+
+function render() {
+  const rows = topRows(state.layer);
+  $("bars").replaceChildren(...rows.flatMap((r, k) => {
+    const cls = k === 0 ? " is-top" : r.label === "·cream" ? " is-cream" : "";
+    return [el("span", { class: `w${cls}` }, r.label),
+      el("span", { class: `bar${cls}` }, el("span", { style: `width: ${Math.max(0, r.p * 100)}%` })),
+      el("span", { class: cls.trim() }, r.text)];
+  }));
+  $("cream").textContent = creamText(state.layer);
+  $("caption").textContent = captionText(state.layer);
+  drawChart();
+}
+
+slider($("layer"), { label: "после блока", min: 0, max: LAYERS - 1, step: 1, value: 0,
+  format: (v) => (v === 0 ? "0 (эмбеддинги)" : v === LAYERS - 1 ? `${v} (выход модели)` : String(v)),
+  onInput: (v) => { state.layer = v; render(); } });
+render();
+ready();
+</script>
+</body>
+</html>

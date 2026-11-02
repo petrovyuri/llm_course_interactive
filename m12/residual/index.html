@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Зачем residual</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.controls { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+#n { flex: 1 1 240px; }
+.input-note { margin: 0; font-size: 13px; color: var(--muted); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.col h2 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.col.res h2 { color: var(--green); }
+.col.plain h2 { color: var(--red); }
+.col .formula { margin: -4px 0 6px; font-size: 12px; color: var(--muted); }
+.metric { display: grid; grid-template-columns: 1fr max-content; gap: 2px 8px; margin-bottom: 6px; font-size: 13px; }
+.metric .name { color: var(--muted); }
+.metric .bar { grid-column: 1 / -1; height: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.metric .bar span { display: block; height: 100%; transition: width .25s; }
+.res .bar span { background: var(--green); }
+.plain .bar span { background: var(--red); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .cols { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 12 · урок 12.3</p>
+<h1>Зачем residual: стопка из N блоков</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel controls">
+  <div class="row"><div id="n"></div>
+    <button type="button" id="seed">другой набор</button><span class="muted-label" id="seed-label"></span></div>
+  <p class="input-note" id="input-note"></p>
+</div>
+<div class="cols">
+  <div class="panel col res"><h2>с residual</h2><p class="formula mono">x = x + attn, x = x + ffn</p><div id="res"></div></div>
+  <div class="panel col plain"><h2>без residual</h2><p class="formula mono">x = attn, x = ffn</p><div id="plain"></div></div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Веса случайные, как в самом начале обучения: каждый блок вносит маленькую поправку. С residual она прибавляется к входу, без residual заменяет его.</p>
+
+<script type="module">
+import { IN_NORMS, NS } from "./data.js";
+import { blocksWord, captionText, cosText, normText, row } from "./logic.js";
+import { el, ready, slider } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { k: 3, seed: 0 };   // k - индекс в NS, по умолчанию 8 блоков
+const NORM_MAX = Math.max(...IN_NORMS) * 1.25;
+const clamp = (v) => Math.max(0, Math.min(100, v));
+
+function metric(name, value, width) {
+  return el("div", { class: "metric" },
+    el("span", { class: "name" }, name), el("span", { class: "val" }, value),
+    el("span", { class: "bar" }, el("span", { style: `width: ${clamp(width)}%` })));
+}
+
+function column(mode) {
+  const r = row(state.seed, NS[state.k], mode);
+  return [metric("|x| выхода", normText(r.norm), (100 * r.norm) / NORM_MAX),
+    metric("похожесть на вход (косинус)", cosText(r.cos), 100 * r.cos)];
+}
+
+function render() {
+  $("res").replaceChildren(...column("res"));
+  $("plain").replaceChildren(...column("plain"));
+  $("seed-label").textContent = `набор ${state.seed + 1} из ${IN_NORMS.length}`;
+  $("input-note").textContent = `Вход: 5 случайных токенов по 16 чисел, |x| входа = ${normText(IN_NORMS[state.seed])}.`;
+  $("caption").textContent = captionText(state.seed, NS[state.k]);
+}
+
+slider($("n"), { label: "блоков в стопке", min: 0, max: NS.length - 1, step: 1, value: state.k,
+  format: (k) => `${NS[k]} ${blocksWord(NS[k])}`, onInput: (k) => { state.k = k; render(); } });
+$("seed").addEventListener("click", () => { state.seed = (state.seed + 1) % IN_NORMS.length; render(); });
+render();
+ready();
+</script>
+</body>
+</html>

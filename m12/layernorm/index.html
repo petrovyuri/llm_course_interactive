@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LayerNorm своими руками</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.fields { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fields label { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; color: var(--muted); }
+.fields input { width: 64px; padding: 4px 6px; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.fields input.is-invalid { border-color: var(--red); color: var(--red); }
+.sliders { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.sliders > div { flex: 1 1 180px; }
+.lines { margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.35; }
+.lines li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lines li:last-child { color: var(--muted); }
+.groups { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 6px; }
+.group h2 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--cyan); }
+.group.after h2 { color: var(--purple); }
+.bar-row { display: grid; grid-template-columns: 22px 1fr 54px; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 2px; }
+.bar-row .track { position: relative; height: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.bar-row .track::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid var(--muted); }
+.bar-row .fill { position: absolute; top: 0; bottom: 0; background: var(--cyan); }
+.after .bar-row .fill { background: var(--purple); }
+.bar-row .v { text-align: right; }
+.group .st { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 520px) {
+  .groups { grid-template-columns: 1fr; }
+  .fields input { width: 56px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 12 · урок 12.9</p>
+<h1>LayerNorm своими руками</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="muted-label">вектор:</span><span class="row" id="presets"></span></div>
+  <div class="fields mono" id="fields"></div>
+  <div class="sliders"><div id="gamma"></div><div id="beta"></div></div>
+</div>
+<div class="panel">
+  <ol class="lines mono" id="lines"></ol>
+  <div class="groups mono">
+    <div class="group"><h2>до: x</h2><div id="before"></div><p class="st" id="before-st"></p></div>
+    <div class="group after"><h2>после: γ · x̂ + β</h2><div id="after"></div><p class="st" id="after-st"></p></div>
+  </div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { PARSE, PRESETS, captionText, lines, output, parseValue, stats } from "./logic.js";
+import { el, presets, ready, slider } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { x: [...PRESETS[0].x], gamma: 1, beta: 0, bad: new Set() };
+const inputs = [0, 1, 2, 3].map((k) => el("input", { id: `x${k + 1}`, type: "text", autocomplete: "off", "aria-label": `x${k + 1}` }));
+$("fields").replaceChildren(...inputs.map((inp, k) => el("label", {}, `x${k + 1}`, inp)));
+
+function fill(x) {
+  inputs.forEach((inp, k) => { inp.value = String(x[k]); inp.classList.remove("is-invalid"); });
+  state.bad.clear();
+}
+
+function bars(values, scale) {
+  return values.map((v, k) => {
+    const w = (50 * Math.min(Math.abs(v), scale)) / scale;
+    const style = v >= 0 ? `left: 50%; width: ${w}%` : `left: ${50 - w}%; width: ${w}%`;
+    return el("div", { class: "bar-row" }, el("span", {}, `x${k + 1}`),
+      el("span", { class: "track" }, el("span", { class: "fill", style })), el("span", { class: "v" }, v.toFixed(3)));
+  });
+}
+
+const spread = (vs) => {
+  const m = vs.reduce((s, v) => s + v, 0) / vs.length;
+  return [m, Math.sqrt(vs.reduce((s, v) => s + (v - m) ** 2, 0) / vs.length)];
+};
+
+function render() {
+  const { x, gamma, beta } = state;
+  $("lines").replaceChildren(...lines(x, gamma, beta).map((t) => el("li", {}, t)));
+  const y = output(x, gamma, beta);
+  const scale = Math.max(1, ...x.map(Math.abs), ...(y ?? []).map(Math.abs));
+  $("before").replaceChildren(...bars(x, scale));
+  const s = stats(x);
+  $("before-st").textContent = `среднее ${s.mu.toFixed(3)}, σ ${s.sigma.toFixed(3)}`;
+  if (y === null) {
+    $("after").replaceChildren(el("p", { class: "st" }, "σ = 0: без eps результата нет"));
+    $("after-st").textContent = "";
+  } else {
+    $("after").replaceChildren(...bars(y, scale));
+    const [m, sd] = spread(y);
+    $("after-st").textContent = `среднее ${(Math.abs(m) < 5e-4 ? 0 : m).toFixed(3)}, σ ${sd.toFixed(3)}`;
+  }
+  $("caption").textContent = state.bad.size ? PARSE : captionText(x);
+}
+
+const chips = presets($("presets"), PRESETS.map((p, i) => ({ label: p.label, value: i })), (i) => {
+  state.x = [...PRESETS[i].x];
+  fill(state.x);
+  render();
+});
+inputs.forEach((inp, k) => inp.addEventListener("input", () => {
+  const v = parseValue(inp.value);
+  inp.classList.toggle("is-invalid", v === null);
+  if (v === null) state.bad.add(k);
+  else {
+    state.bad.delete(k);
+    state.x[k] = v;
+  }
+  chips.setActive(PRESETS.findIndex((p) => p.x.every((a, j) => a === state.x[j])));
+  render();
+}));
+slider($("gamma"), { label: "γ (масштаб)", min: 0, max: 3, step: 0.1, value: 1, format: (v) => v.toFixed(1),
+  onInput: (v) => { state.gamma = v; render(); } });
+slider($("beta"), { label: "β (сдвиг)", min: -2, max: 2, step: 0.1, value: 0, format: (v) => v.toFixed(1),
+  onInput: (v) => { state.beta = v; render(); } });
+chips.setActive(0);
+fill(state.x);
+render();
+ready();
+</script>
+</body>
+</html>
