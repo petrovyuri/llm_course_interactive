@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transformer block по шагам</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 4px; }
+[hidden] { display: none !important; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.flag { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.work { display: grid; gap: 8px; }
+.tables { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; }
+.res { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+.res th { padding: 0 3px; font-weight: 400; color: var(--muted); }
+.res caption { caption-side: top; text-align: left; padding: 0 3px 1px; color: var(--cyan); font-size: 12px; white-space: nowrap; }
+.res td { min-width: 46px; padding: 2px 4px; text-align: right; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: default; }
+.res td button { all: unset; display: block; width: 100%; text-align: right; cursor: pointer; }
+.res td button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+.res tr.is-row td { border-color: var(--cyan); background: rgba(34, 211, 238, .12); }
+.res td.is-cell { border-color: var(--yellow); color: var(--yellow); background: rgba(251, 191, 36, .12); }
+.res td.is-off { color: var(--muted); opacity: .55; }
+.bars { display: grid; grid-template-columns: max-content minmax(80px, 1fr) max-content; gap: 3px 8px; align-items: center; font-size: 12px; min-width: 220px; flex: 1 1 220px; }
+.bars .w { color: var(--muted); }
+.bars .bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.bars .bar span { display: block; height: 100%; background: var(--purple); }
+.bars .is-win { color: var(--yellow); }
+.bars .bar.is-win span { background: var(--yellow); }
+.lines { min-width: 0; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.3; }
+.lines li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lines li.is-now { color: var(--yellow); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .res { border-spacing: 2px; font-size: 10.5px; }
+  .res td { min-width: 0; padding: 2px 2px; }
+  .res th { padding: 0 1px; font-size: 10px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 12 · уроки 12.9-12.19</p>
+<h1>Transformer block по шагам: «кот любил сметану»</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="stages"></div>
+  <div class="row"><span class="muted-label">токен:</span><span class="row" id="query"></span>
+    <button type="button" class="btn-play" id="play">▶ по шагам</button>
+    <label class="flag" id="mask-flag"><input type="checkbox" id="mask"> каузальная маска</label></div>
+</div>
+<div class="panel work">
+  <div class="tables mono" id="tables"></div>
+  <ol class="lines mono" id="lines"></ol>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note" id="note">Числа показаны с 3 знаками, а считаются по точным значениям, поэтому в последнем знаке возможна разница. Код урока 12.20 (nn.LayerNorm с eps = 0.00001) иногда даёт другую последнюю цифру, тогда в конце строки стоит «(код: …)».</p>
+
+<script type="module">
+import { STAGES, TOKENS, VOCAB, X, captionText, cellOf, chain, lines, matrix, units } from "./logic.js";
+import { el, presets, ready, stepPlayer } from "../../kit/ui.js";
+
+const LABELS = { ln1: "LayerNorm 1", qkv: "Q, K, V", scores: "scores", softmax: "softmax", attn: "выход attention",
+  res1: "residual 1", ln2: "LayerNorm 2", ffn: "FFN", res2: "residual 2", logits: "logits", probs: "вероятности" };
+/** Главная таблица этапа: подпись и подписи столбцов. */
+const MAIN = { ln1: ["x̂ [3×4]", 4], qkv: ["Q = K = V = x̂ [3×4]", 4], scores: ["scores [3×3]", TOKENS],
+  softmax: ["веса [3×3]", TOKENS], attn: ["выход attention [3×4]", 4], res1: ["h = x + attn [3×4]", 4],
+  ln2: ["ĥ [3×4]", 4], ffn: ["ffn [3×4]", 4], res2: ["y = h + ffn [3×4]", 4], logits: ["logits [3×5]", VOCAB],
+  probs: ["вероятности [3×5]", VOCAB] };
+/** Таблица-вход этапа: этап, чья главная таблица стоит слева (ln1 - вход x, ffn - ReLU(z)). */
+const INPUT = { scores: "qkv", softmax: "scores", attn: "softmax", res1: "attn", ln2: "res1", res2: "ffn", logits: "res2" };
+const params = new URLSearchParams(location.search);
+const state = {
+  stage: STAGES.includes(params.get("stage")) ? params.get("stage") : "ln1",
+  q: 0,          // токен-строка
+  sel: 0,        // выбранная клетка строки
+  step: -1,      // шаг «▶ по шагам», -1 - обычный вид
+  mask: false,
+};
+const $ = (id) => document.getElementById(id);
+const cols = (c) => (Array.isArray(c) ? c : Array.from({ length: c }, (_, d) => String(d + 1)));
+const maskOn = () => state.mask && STAGES.indexOf(state.stage) >= STAGES.indexOf("scores");
+
+/** Таблица 3 токена × столбцы; onPick(i, j) - клик по клетке, выбранная клетка подсвечена. */
+function table(title, head, cells, { onPick = null } = {}) {
+  const names = cols(head);
+  return el("table", { class: "res" },
+    el("caption", {}, title),
+    el("tr", {}, el("th", {}), names.map((c) => el("th", {}, c))),
+    ...cells.map((r, i) => el("tr", { class: i === state.q ? "is-row" : "" },
+      el("th", {}, TOKENS[i]),
+      r.map((v, j) => el("td", { class: `${onPick && i === state.q && j === state.sel && state.step < 0 ? "is-cell" : ""}${v === "-∞" ? " is-off" : ""}` },
+        onPick ? el("button", { type: "button", "aria-label": `${TOKENS[i]}, ${names[j]}: ${v}`, onclick: () => onPick(i, j) }, v) : v)))));
+}
+
+function pick(i, j) {
+  query.setActive(i);   // кнопка токена следует за строкой клетки
+  change(() => { state.q = i; state.sel = j; });
+}
+
+function bars() {
+  const p = chain(maskOn()).p[state.q];
+  const best = p.indexOf(Math.max(...p));
+  return el("div", { class: "bars mono", "aria-label": `вероятности следующего слова после «${TOKENS[state.q]}»` },
+    ...VOCAB.flatMap((w, v) => [
+      el("span", { class: `w${v === best ? " is-win" : ""}` }, w),
+      el("span", { class: `bar${v === best ? " is-win" : ""}` }, el("span", { style: `width: ${p[v] / 10}%` })),
+      el("span", { class: v === best ? "is-win" : "" }, units(p[v], 3))]));
+}
+
+function tables() {
+  const { stage } = state;
+  const mask = maskOn();
+  const [title, head] = MAIN[stage];
+  const main = table(title, head, matrix(stage, mask), { onPick: pick });
+  if (stage === "ln1") return [table("x [3×4]", 4, X.map((r) => r.map((v) => units(v / 100, 1)))), main];
+  if (stage === "ffn") return [table("ReLU(z) [3×3]", ["z₁", "z₂", "z₃"], chain(mask).relu.map((r) => r.map((v) => units(v, 3)))), main];
+  if (stage === "probs") return [main, bars()];
+  if (!INPUT[stage]) return [main];
+  const [inTitle, inHead] = MAIN[INPUT[stage]];
+  return [table(inTitle, inHead, matrix(INPUT[stage], mask)), main];
+}
+
+function render() {
+  const mask = maskOn();
+  $("tables").replaceChildren(...tables());
+  $("mask-flag").hidden = STAGES.indexOf(state.stage) < STAGES.indexOf("scores");
+  $("mask").checked = state.mask;
+  const text = state.step >= 0 ? lines(state.stage, state.q, mask)[state.step] : cellOf(state.stage, state.q, state.sel, mask);
+  $("lines").replaceChildren(el("li", { class: state.step >= 0 ? "is-now" : "" }, text));
+  $("caption").textContent = captionText(state.stage, state.q, mask);
+}
+
+const player = stepPlayer($("play"), {
+  steps: () => lines(state.stage, state.q, maskOn()),
+  onStep(i) {
+    state.step = i;
+    render();
+  },
+  interval: 1300,
+});
+
+/** Любое изменение: сначала остановить проигрывание. */
+function change(update) {
+  player.stop();
+  update();
+  render();
+}
+
+presets($("stages"), STAGES.map((s) => ({ label: LABELS[s], value: s })), (v) => change(() => { state.stage = v; state.sel = 0; }))
+  .setActive(STAGES.indexOf(state.stage));
+const query = presets($("query"), TOKENS.map((t, i) => ({ label: t, value: i })), (i) => change(() => { state.q = i; }));
+query.setActive(0);
+$("mask").addEventListener("change", () => change(() => { state.mask = $("mask").checked; }));
+render();
+ready();
+</script>
+</body>
+</html>
