@@ -271,5 +271,33 @@
   "lesson": 4,
   "title": "Формы и параметры блока",
   "about": "Формы тензоров по шагам блока и число параметров: от урока 12.4 до GPT-2, как считает код урока 12.20."
+ },
+ {
+  "slug": "m13/cross-entropy",
+  "module": 13,
+  "lesson": 4,
+  "title": "Cross-entropy: цена ошибки",
+  "about": "Логиты, softmax и loss = -ln p правильного токена: цена ошибки и с чего начинает необученная модель."
+ },
+ {
+  "slug": "m13/train-step",
+  "module": 13,
+  "lesson": 7,
+  "title": "Один шаг обучения на числах",
+  "about": "Восемь шагов урока 13.7 на числах модуля 12: loss, градиенты, zero_grad и шаг SGD по W_vocab."
+ },
+ {
+  "slug": "m13/optimizers",
+  "module": 13,
+  "lesson": 6,
+  "title": "SGD и Adam: размер шага",
+  "about": "SGD и Adam в вытянутой долине: как learning rate меняет путь к минимуму и когда SGD расходится."
+ },
+ {
+  "slug": "m13/training-run",
+  "module": 13,
+  "lesson": 9,
+  "title": "Настоящее обучение по эпохам",
+  "about": "Прогон train.py урока: loss по эпохам на тексте урока и на новом тексте, learning rate и переобучение."
  }
 ]
