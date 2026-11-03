@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-entropy: цена ошибки</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.hint { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
+.tok { display: grid; grid-template-columns: 96px minmax(120px, 1fr) minmax(90px, 1fr) 62px; gap: 4px 10px; align-items: center; margin-bottom: 4px; }
+.tok .pick { padding: 3px 8px; font-size: 13px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tok .slider { grid-template-columns: 1fr 66px; gap: 6px; align-items: center; }
+.tok .slider__top { display: contents; }
+.tok .slider__top > span:first-child { display: none; }
+.tok .slider input { grid-column: 1; grid-row: 1; }
+.tok .slider__value { grid-column: 2; grid-row: 1; font-size: 12.5px; text-align: right; white-space: nowrap; }
+.bar { position: relative; height: 16px; padding: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--cyan); opacity: .55; }
+.bar .fill.is-target { background: var(--green); opacity: 1; }
+.pv { font-size: 13px; text-align: right; }
+.calc { display: grid; grid-template-columns: 1fr 250px; gap: 8px 12px; align-items: start; }
+.lines { margin: 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.45; }
+.lines li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lines li:last-child { color: var(--green); }
+.lines.is-batch li:last-child { color: inherit; }
+#mean { margin: 4px 0 0; font-size: 13px; color: var(--green); }
+#curve { width: 100%; height: auto; display: block; }
+#curve text { fill: var(--muted); font-size: 10px; font-family: inherit; }
+#curve .pt-label { fill: var(--green); font-size: 11px; }
+table { border-collapse: collapse; font-size: 12.5px; }
+th { padding: 2px 4px; font-weight: 600; color: var(--muted); text-align: center; }
+th:first-child, td:first-child { text-align: left; padding-right: 6px; color: var(--muted); }
+td { padding: 2px; }
+td button { min-width: 50px; padding: 3px 4px; font-size: 12.5px; }
+td button.is-target { border-color: var(--green); color: var(--green); background: rgba(52, 211, 153, .14); }
+@media (max-width: 520px) {
+  .tok { grid-template-columns: 1fr 62px; }
+  .tok .slot { grid-column: 1 / -1; }
+  .tok .bar { grid-column: 1 / -1; }
+  .tok .pick { grid-row: 1; }
+  .tok .pv { grid-row: 1; grid-column: 2; }
+  .calc { grid-template-columns: 1fr; }
+  #curve { max-width: 300px; }
+  td button { min-width: 44px; padding: 3px 2px; font-size: 12px; }
+  th { padding: 2px 1px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 13 · уроки 13.4 и 13.8</p>
+<h1>Cross-entropy: цена ошибки</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel"><div class="row"><span class="muted-label">пример:</span><span class="row" id="presets"></span></div></div>
+<div class="panel" id="single">
+  <p class="hint">Правильный токен - нажмите на его название или столбик. Ползунки меняют логиты.</p>
+  <div id="tokens"></div>
+</div>
+<div class="panel" id="batch" hidden>
+  <p class="hint">Две позиции примера модуля 12 (с маской). Правильное слово позиции - нажмите на его вероятность.</p>
+  <table id="batch-table" class="mono"><thead></thead><tbody></tbody></table>
+</div>
+<div class="panel calc">
+  <div><ol class="lines mono" id="lines"></ol><p class="mono" id="mean" hidden></p></div>
+  <svg id="curve" viewBox="0 0 250 166" role="img" aria-label="График L = -ln p: чем меньше вероятность правильного токена, тем больше loss"></svg>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { BATCH, PRESETS, batchCaption, batchLine, batchRows, captionText, lines, pBar, parsePreset, probs } from "./logic.js";
+import { fixed } from "../../kit/format.js";
+import { el, presets, ready, slider, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const state = { key: parsePreset(params.get("preset") ?? ""), st: null, targets: [...BATCH.targets] };
+let rows = [];
+
+const W = 250, H = 166, PL = 28, PR = 8, PT = 8, PB = 32, LMAX = 16;
+const sx = (p) => PL + p * (W - PL - PR);
+const sy = (L) => PT + (1 - Math.min(L, LMAX) / LMAX) * (H - PT - PB);
+
+function setTarget(i) {
+  state.st.target = i;
+  render();
+}
+
+function build(top) {
+  rows = state.st.labels.map((label, i) => {
+    const holder = el("div", { class: "slot" });
+    slider(holder, { label: `логит z токена «${label}»`, min: -5, max: top, step: 0.1, value: state.st.logits[i], format: (v) => `z = ${v.toFixed(1)}`,
+      onInput: (v) => { state.st.logits[i] = v; render(); } });
+    holder.querySelector("input").setAttribute("aria-label", `логит z токена «${label}»`);   // подпись над ползунком скрыта
+    const pick = el("button", { type: "button", class: "chip pick", "aria-pressed": "false", onclick: () => setTarget(i) }, label);
+    const fill = el("span", { class: "fill" });
+    const bar = el("button", { type: "button", class: "bar", "aria-label": `сделать «${label}» правильным`, onclick: () => setTarget(i) }, fill);
+    const pv = el("span", { class: "pv mono" });
+    return { node: el("div", { class: "tok" }, pick, holder, bar, pv), pick, fill, pv };
+  });
+  $("tokens").replaceChildren(...rows.map((r) => r.node));
+}
+
+function load(key) {
+  state.key = key;
+  const batch = key === "batch";
+  $("single").hidden = batch;
+  $("batch").hidden = !batch;
+  $("mean").hidden = !batch;
+  $("lines").classList.toggle("is-batch", batch);
+  if (batch) {
+    state.targets = [...BATCH.targets];
+    $("batch-table").tHead.replaceChildren(el("tr", {}, el("th", {}, "после"), ...BATCH.vocab.map((w) => el("th", {}, w))));
+  } else {
+    const p = PRESETS.find((x) => x.key === key);
+    state.st = { labels: p.labels, logits: [...p.logits], target: p.target, rest: p.rest };
+    build(p.rest ? 15 : 5);
+  }
+  render();
+}
+
+function drawCurve(points) {
+  const path = [];
+  for (let L = 0; L <= LMAX + 1e-9; L += 0.05) path.push(`${path.length ? "L" : "M"}${sx(Math.exp(-L)).toFixed(1)},${sy(L).toFixed(1)}`);
+  const nodes = [
+    svg("line", { x1: PL, x2: W - PR, y1: sy(0), y2: sy(0), stroke: "var(--line)" }),
+    svg("line", { x1: PL, x2: PL, y1: PT, y2: sy(0), stroke: "var(--line)" }),
+    svg("path", { d: path.join(""), fill: "none", stroke: "var(--purple)", "stroke-width": 2 }),
+  ];
+  for (const L of [0, 4, 8, 12, 16]) nodes.push(Object.assign(svg("text", { x: PL - 4, y: sy(L) + 3, "text-anchor": "end" }), { textContent: String(L) }));
+  for (const p of [0, 0.5, 1]) nodes.push(Object.assign(svg("text", { x: sx(p), y: sy(0) + 12, "text-anchor": "middle" }), { textContent: String(p) }));
+  nodes.push(Object.assign(svg("text", { x: (PL + W - PR) / 2, y: H - 3, "text-anchor": "middle" }), { textContent: "p правильного токена" }));
+  nodes.push(Object.assign(svg("text", { x: PL + 12, y: PT + 8 }), { textContent: "L = -ln p" }));
+  // у двух точек подпись верхней (больший L) ставится над ней, нижней - под ней, чтобы не наезжали
+  const top = points.length > 1 ? (points[0].L >= points[1].L ? 0 : 1) : 0;
+  points.forEach((pt, k) => {
+    const x = sx(pt.p), y = sy(pt.L);
+    const right = x < W - 80;
+    const dy = k === top ? -7 : 15;
+    nodes.push(svg("circle", { cx: x, cy: y, r: 4.5, fill: "var(--green)", stroke: "var(--bg)", "stroke-width": 1.5 }));
+    nodes.push(Object.assign(svg("text", { class: "pt-label", x: right ? x + 8 : x - 8, y: Math.max(PT + 8, y + dy), "text-anchor": right ? "start" : "end" }),
+      { textContent: pt.label }));
+  });
+  $("curve").replaceChildren(...nodes);
+}
+
+function render() {
+  if (state.key === "batch") {
+    const data = batchRows(state.targets);
+    $("batch-table").tBodies[0].replaceChildren(...data.map((r, i) => el("tr", {}, el("td", {}, `«${r.context}»`),
+      ...r.cells.map((c, v) => el("td", {}, el("button", { type: "button", class: v === state.targets[i] ? "is-target" : "",
+        "aria-pressed": String(v === state.targets[i]), "aria-label": `после «${r.context}» правильное «${BATCH.vocab[v]}»`,
+        onclick: () => { state.targets[i] = v; render(); } }, c))))));
+    $("lines").replaceChildren(...data.map((r) => el("li", {}, r.line)));
+    $("mean").textContent = batchLine(state.targets);
+    $("caption").textContent = batchCaption(state.targets);
+    drawCurve(state.targets.map((tg, i) => {
+      const p = BATCH.p[i][tg];
+      return { p, L: -Math.log(p), label: `L${"₁₂"[i]} = ${fixed(-Math.log(p), 3)}` };
+    }));
+    return;
+  }
+  const { st } = state;
+  const p = probs(st.logits, st.rest);
+  rows.forEach((r, i) => {
+    r.pick.setAttribute("aria-pressed", String(i === st.target));
+    r.fill.style.width = `${(100 * p[i]).toFixed(2)}%`;
+    r.fill.classList.toggle("is-target", i === st.target);
+    r.pv.textContent = pBar(p[i]);
+  });
+  $("lines").replaceChildren(...lines(st).map((t) => el("li", {}, t)));
+  $("caption").textContent = captionText(st);
+  const L = -Math.log(p[st.target]);
+  drawCurve([{ p: p[st.target], L, label: `L = ${fixed(L, 3)}` }]);
+}
+
+const chips = presets($("presets"), PRESETS.map((p) => ({ label: p.label, value: p.key })), (key) => load(key));
+chips.setActive(PRESETS.findIndex((p) => p.key === state.key));
+load(state.key);
+ready();
+</script>
+</body>
+</html>

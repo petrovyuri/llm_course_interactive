@@ -49,6 +49,20 @@ export function listStr(x) {
   return Array.isArray(x) ? "[" + x.map(listStr).join(", ") + "]" : num(x);
 }
 
+/**
+ * Вероятность для строки «L = -ln p ≈ …» (модуль 13): наименьшая точность от 3 значащих после нулей,
+ * при которой -ln от показанного числа округляется к тому же L, что и от точного: 0.2347 → «0.2347», а не «0.235».
+ */
+export function pForLoss(p) {
+  const want = fixed(-Math.log(p), 3);
+  const start = p >= 0.001 ? 3 : Math.floor(-Math.log10(p)) + 3;
+  for (let k = start; k < start + 6; k++) {
+    const s = fixed(p, k);
+    if (Number(s) > 0 && fixed(-Math.log(Number(s)), 3) === want) return s;
+  }
+  return fixed(p, start + 5);
+}
+
 /** Текст поля ввода → число (запятая допустима) или null, если это не число или |x| > limit. */
 export function parseNumber(text, limit) {
   const t = String(text).trim().replace(",", ".");

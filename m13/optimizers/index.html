@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SGD и Adam: размер шага</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+#eta { flex: 1 1 200px; max-width: 260px; }
+#steps { font-size: 13px; color: var(--yellow); }
+#map { width: 100%; height: auto; display: block; }
+#map text { font-size: 11px; font-family: inherit; }
+.legend { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; font-size: 12.5px; }
+.legend .sgd { color: var(--orange); }
+.legend .adam { color: var(--cyan); }
+.tables { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: flex-start; }
+.res { border-collapse: separate; border-spacing: 3px 1px; font-size: 11.5px; line-height: 1.25; }
+.res caption { caption-side: top; text-align: left; padding: 0 3px 1px; font-size: 12px; }
+.res th { padding: 0 4px; font-weight: 400; color: var(--muted); text-align: left; white-space: nowrap; }
+.res td { min-width: 58px; padding: 0 4px; text-align: right; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; }
+#tbl-sgd caption { color: var(--orange); }
+#tbl-adam caption { color: var(--cyan); }
+@media (max-width: 520px) {
+  .res { font-size: 11px; border-spacing: 2px 1px; }
+  .res th { white-space: normal; padding: 0 2px; }
+  .res td { min-width: 0; padding: 0 2px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 13 · урок 13.6</p>
+<h1>SGD и Adam: размер шага</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel"><div class="row"><div id="eta"></div>
+  <button type="button" id="one">шаг</button><button type="button" id="twenty">20 шагов</button><button type="button" id="reset">сброс</button>
+  <span class="mono" id="steps"></span>
+  <p class="legend mono"><span class="sgd" id="leg-sgd"></span><span class="adam" id="leg-adam"></span></p></div></div>
+<div class="panel">
+  <svg id="map" viewBox="0 0 600 170" role="img" aria-label="Линии уровня f(w₁, w₂) = 0.1·w₁² + 2·w₂² и пути SGD и Adam от старта к минимуму"></svg>
+</div>
+<div class="panel tables mono">
+  <table class="res" id="tbl-sgd"></table>
+  <table class="res" id="tbl-adam"></table>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+
+<script type="module">
+import { LRS, MAX_STEPS, START, captionText, diverged, path, stepRows } from "./logic.js";
+import { el, ready, slider, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { i: LRS.indexOf(0.1), n: 0 };
+const W = 600, H = 170, X0 = 4.5, Y0 = 1.8;
+const sx = (w1) => W / 2 + (w1 / X0) * (W / 2);
+const sy = (w2) => H / 2 - (w2 / Y0) * (H / 2);
+const fmt = (L) => (L < 1e-6 ? "≈0" : Number(L.toPrecision(3)).toString());
+
+function base() {
+  const nodes = [svg("rect", { x: 0, y: 0, width: W, height: H, fill: "var(--bg)", stroke: "var(--line)" })];
+  const clip = svg("clipPath", { id: "frame" });
+  clip.append(svg("rect", { x: 0, y: 0, width: W, height: H }));
+  nodes.push(svg("defs"), clip);
+  const g = svg("g", { "clip-path": "url(#frame)" });
+  for (const c of [0.05, 0.2, 0.5, 1, 2, 3.5, 5.725, 9]) {
+    g.append(svg("ellipse", { cx: sx(0), cy: sy(0), rx: (Math.sqrt(c / 0.1) / X0) * (W / 2), ry: (Math.sqrt(c / 2) / Y0) * (H / 2),
+      fill: "none", stroke: "var(--line)", "stroke-width": c === 5.725 ? 1.5 : 1 }));
+  }
+  g.append(svg("line", { x1: sx(0) - 6, x2: sx(0) + 6, y1: sy(0), y2: sy(0), stroke: "var(--green)", "stroke-width": 2 }),
+    svg("line", { x1: sx(0), x2: sx(0), y1: sy(0) - 6, y2: sy(0) + 6, stroke: "var(--green)", "stroke-width": 2 }));
+  nodes.push(g);
+  nodes.push(Object.assign(svg("text", { x: sx(0) + 8, y: sy(0) + 14, fill: "var(--green)" }), { textContent: "минимум" }));
+  nodes.push(svg("circle", { cx: sx(START[0]), cy: sy(START[1]), r: 4, fill: "var(--muted)" }));
+  nodes.push(Object.assign(svg("text", { x: sx(START[0]) - 6, y: sy(START[1]) - 8, fill: "var(--muted)", "text-anchor": "middle" }), { textContent: "старт" }));
+  nodes.push(Object.assign(svg("text", { x: W - 6, y: H - 6, fill: "var(--muted)", "text-anchor": "end" }), { textContent: "w₁ →" }));
+  nodes.push(Object.assign(svg("text", { x: 6, y: 14, fill: "var(--muted)" }), { textContent: "↑ w₂" }));
+  nodes.push(Object.assign(svg("text", { x: 6, y: H - 6, fill: "var(--muted)" }), { textContent: "f = 0.1·w₁² + 2·w₂²" }));
+  return nodes;
+}
+
+function trail(states, color) {
+  const g = svg("g", { "clip-path": "url(#frame)" });
+  const pts = states.map((s) => `${sx(Math.max(-1e3, Math.min(1e3, s.w[0]))).toFixed(1)},${sy(Math.max(-1e3, Math.min(1e3, s.w[1]))).toFixed(1)}`);
+  g.append(svg("polyline", { points: pts.join(" "), fill: "none", stroke: color, "stroke-width": 1.6, "stroke-linejoin": "round" }));
+  const last = states.at(-1).w;
+  if (Math.abs(last[0]) <= X0 && Math.abs(last[1]) <= Y0) g.append(svg("circle", { cx: sx(last[0]), cy: sy(last[1]), r: 4.5, fill: color, stroke: "var(--bg)" }));
+  return g;
+}
+
+function table(id, title, rows) {
+  $(id).replaceChildren(el("caption", {}, title), el("tr", {}, el("th", {}), el("th", {}, "w₁"), el("th", {}, "w₂")),
+    ...rows.map((r) => el("tr", {}, el("th", {}, r.label), el("td", {}, r.a), el("td", {}, r.b))));
+}
+
+function render() {
+  const eta = LRS[state.i], { n } = state;
+  const ps = path("sgd", eta, n), pa = path("adam", eta, n);
+  $("map").replaceChildren(...base(), trail(ps, "var(--orange)"), trail(pa, "var(--cyan)"));
+  const gone = diverged("sgd", eta, n);
+  $("leg-sgd").textContent = gone ? `SGD: улетел на шаге ${ps.length - 1}` : `SGD: loss ${fmt(ps.at(-1).loss)}`;
+  $("leg-adam").textContent = `Adam: loss ${fmt(pa.at(-1).loss)}`;
+  table("tbl-sgd", "SGD", stepRows("sgd", eta, n));
+  table("tbl-adam", "Adam", stepRows("adam", eta, n));
+  $("steps").textContent = `шаг ${n}`;
+  $("caption").textContent = captionText(eta, n);
+  $("one").disabled = $("twenty").disabled = n >= MAX_STEPS;
+}
+
+slider($("eta"), { label: "learning rate η", min: 0, max: LRS.length - 1, step: 1, value: state.i, format: (i) => String(LRS[i]),
+  onInput: (i) => { state.i = i; render(); } });
+$("one").addEventListener("click", () => { state.n = Math.min(MAX_STEPS, state.n + 1); render(); });
+$("twenty").addEventListener("click", () => { state.n = Math.min(MAX_STEPS, state.n + 20); render(); });
+$("reset").addEventListener("click", () => { state.n = 0; render(); });
+render();
+ready();
+</script>
+</body>
+</html>

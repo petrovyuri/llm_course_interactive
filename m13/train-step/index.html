@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Один шаг обучения на числах</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+#eta { flex: 1 1 200px; max-width: 280px; }
+#round { font-size: 13px; color: var(--yellow); }
+.work { display: grid; gap: 6px; }
+.tables { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; }
+.res { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+.res th { padding: 0 3px; font-weight: 400; color: var(--muted); }
+.res caption { caption-side: top; text-align: left; padding: 0 3px 1px; color: var(--cyan); font-size: 12px; white-space: nowrap; }
+.res td { min-width: 46px; padding: 2px 4px; text-align: right; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.res td button { all: unset; display: block; width: 100%; text-align: right; cursor: pointer; }
+.res td button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+.res td.is-target { border-color: var(--green); color: var(--green); }
+.res td.is-cell { border-color: var(--yellow); color: var(--yellow); background: rgba(251, 191, 36, .12); }
+.grads { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.grads li:first-child { color: var(--ink); }
+.lines { margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.35; }
+.lines li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lines li.is-now { color: var(--yellow); }
+#chart { width: 100%; max-width: 360px; height: auto; display: block; }
+#chart text { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .res { border-spacing: 2px; font-size: 10.5px; }
+  .res td { min-width: 0; padding: 2px 2px; }
+  .res th { padding: 0 1px; font-size: 10px; }
+  .res caption { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 13 · уроки 13.5 и 13.7</p>
+<h1>Один шаг обучения на числах: «кот любил сметану»</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="stages"></div>
+  <div class="row"><button type="button" class="btn-play" id="next">дальше →</button>
+    <button type="button" id="ten">10 шагов</button><button type="button" id="reset">сначала</button>
+    <span class="mono" id="round"></span><div id="eta"></div></div>
+</div>
+<div class="panel work">
+  <div class="tables mono" id="tables"></div>
+  <ul class="grads mono" id="grads" hidden></ul>
+  <ol class="lines mono" id="lines"></ol>
+  <div id="chart-box" hidden><svg id="chart" viewBox="0 0 360 96" role="img" aria-label="Loss по кругам обучения"></svg></div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Шаг делаем только по W_vocab, чтобы его можно было проверить руками. В настоящей модели optimizer.step() двигает все веса сразу.</p>
+
+<script type="module">
+import { MAX_ROUNDS, STAGES, VOCAB, WV, captionText, cellLine, defaultCell, forward, gradLogits, gradW, gradsList, lossOf,
+  parseStage, sgdStep, stageLines, tables } from "./logic.js";
+import { fixed } from "../../kit/format.js";
+import { el, presets, ready, slider, svg } from "../../kit/ui.js";
+
+const LABELS = { batch: "1 batch", split: "2 сдвиг", forward: "3 forward", loss: "4 loss", zero: "5 zero_grad",
+  backward: "6 backward", step: "7 step", next: "8 итог шага" };
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const state = { stage: parseStage(params.get("stage") ?? ""), eta: 0.1, wvs: [WV.map((r) => [...r])], sel: null };
+state.sel = defaultCell(state.stage);
+
+const round = () => state.wvs.length;                     // круг k начинается с весов wvs[k - 1]
+const current = () => {
+  const k = round();
+  const prev = k > 1 ? gradW(gradLogits(forward(state.wvs[k - 2]).p)) : null;
+  return { round: k, eta: state.eta, wv: state.wvs[k - 1], prevGrad: prev };
+};
+
+/** Следующий круг: шаг SGD от весов текущего круга с текущим η. */
+function advance() {
+  const wv = state.wvs[round() - 1];
+  state.wvs.push(sgdStep(wv, gradW(gradLogits(forward(wv).p)), state.eta));
+}
+
+function setStage(stage) {
+  state.stage = stage;
+  state.sel = defaultCell(stage);
+  chips.setActive(STAGES.indexOf(stage));
+  render();
+}
+
+function table(t) {
+  const marked = (i, j) => t.marks.some(([a, b]) => a === i && b === j);
+  return el("table", { class: "res" },
+    el("caption", {}, t.title),
+    el("tr", {}, el("th", {}), t.cols.map((c) => el("th", {}, c))),
+    ...t.cells.map((r, i) => el("tr", {}, el("th", {}, t.rows[i]),
+      r.map((v, j) => {
+        const sel = state.sel && state.sel[0] === t.key && state.sel[1] === i && state.sel[2] === j;
+        return el("td", { class: `${marked(i, j) ? "is-target" : ""}${sel ? " is-cell" : ""}` },
+          t.pick ? el("button", { type: "button", "aria-label": `${t.title}: ${t.rows[i]}, ${t.cols[j]} = ${v}`,
+            onclick: () => { state.sel = [t.key, i, j]; render(); } }, v) : v);
+      }))));
+}
+
+function chart() {
+  const losses = state.wvs.map((w) => lossOf(forward(w).p).mean);
+  const W = 360, H = 96, PL = 30, PR = 8, PT = 8, PB = 18;
+  const n = Math.max(10, losses.length);
+  const sx = (k) => PL + ((k - 1) / (n - 1)) * (W - PL - PR);
+  const sy = (L) => PT + (1 - Math.min(L, 2) / 2) * (H - PT - PB);
+  const pts = losses.map((L, i) => `${sx(i + 1).toFixed(1)},${sy(L).toFixed(1)}`).join(" ");
+  const nodes = [svg("line", { x1: PL, x2: W - PR, y1: sy(0), y2: sy(0), stroke: "var(--line)" }),
+    svg("line", { x1: PL, x2: PL, y1: PT, y2: sy(0), stroke: "var(--line)" }),
+    svg("polyline", { points: pts, fill: "none", stroke: "var(--purple)", "stroke-width": 2 })];
+  for (const L of [0, 1, 2]) nodes.push(Object.assign(svg("text", { x: PL - 4, y: sy(L) + 3, "text-anchor": "end" }), { textContent: String(L) }));
+  nodes.push(Object.assign(svg("text", { x: PL, y: H - 4 }), { textContent: "круг 1" }));
+  nodes.push(Object.assign(svg("text", { x: W - PR, y: H - 4, "text-anchor": "end" }), { textContent: `круг ${n}` }));
+  const k = losses.length;
+  nodes.push(svg("circle", { cx: sx(k), cy: sy(losses[k - 1]), r: 4, fill: "var(--yellow)" }));
+  nodes.push(Object.assign(svg("text", { x: Math.min(sx(k) + 6, W - 60), y: Math.max(sy(losses[k - 1]) - 6, PT + 8) }),
+    { textContent: `loss ${fixed(losses[k - 1], 3)}` }));
+  $("chart").replaceChildren(...nodes);
+}
+
+function render() {
+  const s = current();
+  const { stage } = state;
+  $("tables").replaceChildren(...tables(stage, s).map(table));
+  const lines = stageLines(stage, s).map((t) => el("li", {}, t));
+  if (state.sel) lines.push(el("li", { class: "is-now" }, cellLine(stage, s, ...state.sel)));
+  $("lines").replaceChildren(...lines);
+  $("grads").hidden = stage !== "backward";
+  if (stage === "backward") $("grads").replaceChildren(el("li", {}, "до остальных весов ошибка тоже дошла, max |g|:"),
+    ...gradsList(s).map((t) => el("li", {}, t)));
+  $("chart-box").hidden = !["loss", "next"].includes(stage);   // у SVG нет свойства hidden - прячем обёртку
+  if (!$("chart-box").hidden) chart();
+  $("round").textContent = `круг ${s.round}`;
+  $("caption").textContent = captionText(stage, s);
+  $("next").disabled = stage === "next" && round() >= MAX_ROUNDS;
+  $("ten").disabled = round() >= MAX_ROUNDS;
+}
+
+const chips = presets($("stages"), STAGES.map((st) => ({ label: LABELS[st], value: st })), (st) => setStage(st));
+$("next").addEventListener("click", () => {
+  const i = STAGES.indexOf(state.stage);
+  if (i < STAGES.length - 1) { setStage(STAGES[i + 1]); return; }
+  if (round() < MAX_ROUNDS) advance();
+  setStage("batch");
+});
+$("ten").addEventListener("click", () => {
+  for (let n = 0; n < 10 && round() < MAX_ROUNDS; n++) advance();
+  setStage("loss");
+});
+$("reset").addEventListener("click", () => {
+  state.wvs = [WV.map((r) => [...r])];
+  setStage("batch");
+});
+slider($("eta"), { label: "η (learning rate)", min: 0.01, max: 1, step: 0.01, value: state.eta, format: (v) => v.toFixed(2),
+  onInput: (v) => { state.eta = v; render(); } });
+chips.setActive(STAGES.indexOf(state.stage));
+render();
+ready();
+</script>
+</body>
+</html>
