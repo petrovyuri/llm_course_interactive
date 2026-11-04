@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как модель учится говорить</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.console { margin: 6px 0 0; font-size: 12.5px; line-height: 1.4; white-space: pre-wrap; }
+.console .saved { color: var(--green); }
+.console .kept { color: var(--muted); }
+#chart { width: 100%; height: auto; display: block; }
+#chart text { font-size: 11px; font-family: inherit; fill: var(--muted); }
+.gens { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.gens li { overflow-wrap: anywhere; white-space: pre-wrap; }
+.gens .p { color: var(--muted); }
+.gens .random { color: var(--red); }
+.gens .dots, .gens .loop { color: var(--orange); }
+.gens .story { color: var(--ink); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+.legend { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.ring { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 1.5px solid var(--cyan); border-radius: 50%; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 14 · урок 14.2</p>
+<h1>Как модель учится говорить</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel">
+  <div id="epoch"></div>
+  <p class="console mono"><span id="loss"></span><br><span id="saved"></span></p>
+</div>
+<div class="panel">
+  <svg id="chart" viewBox="0 0 600 110" role="img" aria-label="Loss по эпохам и сохранения лучшей модели"></svg>
+  <p class="legend"><span class="ring"></span>loss вырос, best_model.pth не перезаписан</p>
+</div>
+<div class="panel">
+  <ul class="gens mono" id="gens"></ul>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Модель обучена train.py урока 14.2 с torch.manual_seed(42), которого в уроке нет. Генерация - generate() урока 14.3 на 20 токенов с весами выбранной эпохи. У вас числа и тексты будут другими.</p>
+
+<script type="module">
+import { BEST_EPOCH, LAST, captionText, chartPoints, genRows, lossText, savedText } from "./logic.js";
+import { el, ready, slider, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { e: BEST_EPOCH };
+const points = chartPoints();
+const W = 600, H = 110, PL = 30, PR = 10, PT = 8, PB = 20;
+const LMAX = Math.ceil(Math.max(...points.map((p) => p[1])));
+const sx = (e) => PL + ((e - 1) / (LAST - 1)) * (W - PL - PR);
+const sy = (L) => PT + (1 - L / LMAX) * (H - PT - PB);
+
+function chart() {
+  const nodes = [svg("line", { x1: PL, x2: W - PR, y1: sy(0), y2: sy(0), stroke: "var(--line)" }),
+    svg("line", { x1: PL, x2: PL, y1: PT, y2: sy(0), stroke: "var(--line)" })];
+  for (const L of [0, Math.round(LMAX / 2), LMAX]) nodes.push(Object.assign(svg("text", { x: PL - 4, y: sy(L) + 4, "text-anchor": "end" }), { textContent: String(L) }));
+  for (const e of [1, 10, 20, 30, 40, 50]) nodes.push(Object.assign(svg("text", { x: sx(e), y: H - 4, "text-anchor": "middle" }), { textContent: String(e) }));
+  nodes.push(svg("polyline", { points: points.map(([e, L]) => `${sx(e).toFixed(1)},${sy(L).toFixed(1)}`).join(" "),
+    fill: "none", stroke: "var(--purple)", "stroke-width": 1.8 }));
+  for (const [e, L, saved] of points) {
+    if (!saved) nodes.push(svg("circle", { cx: sx(e), cy: sy(L), r: 3, fill: "var(--bg)", stroke: "var(--cyan)", "stroke-width": 1.5 }));
+  }
+  if (state.e > 0) {
+    const [, L] = points[state.e - 1];
+    nodes.push(svg("line", { x1: sx(state.e), x2: sx(state.e), y1: PT, y2: sy(0), stroke: "var(--yellow)" }));
+    nodes.push(svg("circle", { cx: sx(state.e), cy: sy(L), r: 4.5, fill: "var(--yellow)", stroke: "var(--bg)" }));
+  }
+  $("chart").replaceChildren(...nodes);
+}
+
+function render() {
+  const { e } = state;
+  $("loss").textContent = lossText(e);
+  const saved = savedText(e);
+  $("saved").textContent = saved;
+  $("saved").className = saved.includes("Сохранена") ? "saved" : "kept";
+  chart();
+  $("gens").replaceChildren(...genRows(e).map((r) => el("li", {}, el("span", { class: "p" }, r.prompt),
+    el("span", { class: r.kind }, r.text))));
+  $("caption").textContent = captionText(e);
+}
+
+slider($("epoch"), { label: "эпоха", min: 0, max: LAST, step: 1, value: state.e, format: String,
+  onInput: (e) => { state.e = e; render(); } });
+render();
+ready();
+</script>
+</body>
+</html>
