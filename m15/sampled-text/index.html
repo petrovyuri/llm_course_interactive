@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Генерация с ручками</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 5px; }
+.muted-label { color: var(--muted); font-size: 13px; min-width: 64px; }
+.chip:disabled { opacity: .35; cursor: default; }
+.tokens { display: flex; flex-wrap: wrap; gap: 3px; font-size: 12.5px; line-height: 1.2; }
+.tok { padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); white-space: pre; font: inherit; cursor: pointer; }
+.tok.prompt { border-style: dashed; color: var(--muted); cursor: default; }
+.tok.off { color: var(--orange); border-color: var(--orange); }
+.tok.cyc { background: rgba(249, 115, 22, .3); }
+.tok.sel { outline: 2px solid var(--yellow); outline-offset: 1px; }
+#step { margin: 6px 0 0; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.legend .off { color: var(--orange); }
+.runs { display: grid; gap: 6px; }
+.runs h2 { margin: 0 0 1px; font-size: 12.5px; font-weight: 600; color: var(--cyan); }
+.plain { margin: 0; font-size: 12.5px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plain .title { color: var(--cyan); font-weight: 600; }
+.plain .prompt { color: var(--muted); }
+.plain .off { color: var(--orange); }
+.plain .cyc { background: rgba(249, 115, 22, .3); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 15 · уроки 15.1 и 15.6</p>
+<h1>Генерация с ручками</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="muted-label">вид:</span><span class="row" id="views"></span></div>
+  <div class="row" id="row-mode"><span class="muted-label">режим:</span><span class="row" id="modes"></span></div>
+  <div class="row" id="row-t"><span class="muted-label">T:</span><span class="row" id="temps"></span></div>
+  <div class="row" id="row-f"><span class="muted-label">фильтр:</span><span class="row" id="filters"></span></div>
+  <div class="row" id="row-s"><span class="muted-label">seed:</span><span class="row" id="seeds"></span></div>
+</div>
+<div class="panel" id="one">
+  <div class="tokens mono" id="tokens"></div>
+  <p class="mono" id="step"></p>
+  <p class="legend"><span>промт - пунктиром</span><span class="off">оранжевый - выбран не лидер</span><span>подсветка - круг</span><span>«·» пробел, «↵» перенос строки</span></p>
+</div>
+<div class="panel runs" id="many"></div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Модель урока 14.2, обученная с seed 42, как в демо модуля 14; генерация - generate() урока 15.6 с промтом «The cat was», 40 новых токенов, перед каждым запуском torch.manual_seed(seed). p - вероятность после температуры и фильтра. Ваши тексты будут другими.</p>
+
+<script type="module">
+import { FILTERS, SEEDS, TEMPS, captionText, greedyView, parseView, runKey, stepLine, tokensView, viewCaption } from "./logic.js";
+import { el, presets, ready } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const state = { view: parseView(params.get("view") ?? ""), greedy: false, t10: 10, filter: "none", seed: 42, sel: 0 };
+const FILTER_LABEL = { none: "без фильтра", topk: "top-k 5", topp: "top-p 0.9" };
+
+function tokenRow(key, withSel) {
+  const view = tokensView(key);
+  const first = view.findIndex((x) => x.kind === "gen");
+  return view.map((t, i) => {
+    const g = i - first;
+    const cls = `tok ${t.kind}${t.rank > 1 ? " off" : ""}${t.inCycle ? " cyc" : ""}${withSel && g === state.sel ? " sel" : ""}`;
+    if (t.kind === "prompt" || !withSel) return el("span", { class: cls }, t.label);
+    return el("button", { type: "button", class: cls, "aria-label": `шаг ${g + 1}: ${t.label}`, onclick: () => { state.sel = g; render(); } }, t.label);
+  });
+}
+
+function render() {
+  const many = state.view === "greedy";
+  $("one").hidden = many;
+  $("many").hidden = !many;
+  for (const id of ["row-mode", "row-t", "row-f", "row-s"]) $(id).hidden = many;
+  if (many) {
+    $("many").replaceChildren(...greedyView().map((r) => el("p", { class: "plain mono" }, el("span", { class: "title" }, `${r.title}: `),
+      ...tokensView(r.key).map((t) => el("span", {
+        class: `${t.kind === "prompt" ? "prompt" : ""}${t.rank > 1 ? " off" : ""}${t.inCycle ? " cyc" : ""}`,
+      }, t.text)))));
+    $("caption").textContent = viewCaption();
+    return;
+  }
+  const key = runKey(state.greedy, state.t10, state.filter, state.seed);
+  $("tokens").replaceChildren(...tokenRow(key, true));
+  $("step").textContent = stepLine(key, state.sel);
+  $("caption").textContent = captionText(key);
+  for (const b of document.querySelectorAll("#temps .chip, #filters .chip, #seeds .chip")) b.disabled = state.greedy;
+}
+
+const views = presets($("views"), [{ label: "сравнение (урок 15.1)", value: "greedy" }, { label: "ручки", value: "" }], (v) => { state.view = v; render(); });
+const modes = presets($("modes"), [{ label: "greedy", value: true }, { label: "сэмплирование", value: false }], (v) => { state.greedy = v; render(); });
+const temps = presets($("temps"), TEMPS.map((t) => ({ label: String(t / 10), value: t })), (v) => { state.t10 = v; render(); });
+const filters = presets($("filters"), FILTERS.map((f) => ({ label: FILTER_LABEL[f], value: f })), (v) => { state.filter = v; render(); });
+const seeds = presets($("seeds"), SEEDS.map((s) => ({ label: String(s), value: s })), (v) => { state.seed = v; render(); });
+views.setActive(state.view === "greedy" ? 0 : 1);
+modes.setActive(1);
+temps.setActive(TEMPS.indexOf(state.t10));
+filters.setActive(0);
+seeds.setActive(SEEDS.indexOf(state.seed));
+render();
+ready();
+</script>
+</body>
+</html>
