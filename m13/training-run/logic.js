@@ -2,26 +2,13 @@
 // (data.js): пять прогонов по 100 эпох, loss «как печатает train.py», loss на новом тексте и прогноз для
 // «The cat loved sour» на каждой эпохе. Подписи строятся по данным. Чистые функции без DOM - сверяются с golden.json.
 
-import { fixed } from "../../kit/format.js";
+import { fixed, pText, tokenLabel } from "../../kit/format.js";
 import { LESSON, NEW_TEXT, NEXT, PROMPT, RUNS } from "./data.js";
 
-export { LESSON, NEW_TEXT, PROMPT, RUNS };
+export { LESSON, NEW_TEXT, PROMPT, RUNS, pText, tokenLabel };
 export const EPOCHS = 100;
 const run = (key) => RUNS.find((r) => r.key === key);
 const l2 = (x) => fixed(x, 2);
-
-/** Пробел - «·», перевод строки - «↵», пустой - «∅»; длиннее 9 символов - 8 и «…» (случайные токены эпохи 0). */
-export function tokenLabel(t) {
-  const s = t.replaceAll(" ", "·").replaceAll("\n", "↵") || "∅";
-  const chars = Array.from(s);
-  return chars.length > 9 ? chars.slice(0, 8).join("") + "…" : s;
-}
-
-export function pText(p) {
-  if (p >= 0.01) return fixed(p, 3);
-  if (p >= 0.0001) return fixed(p, 4);
-  return "<1e-4";
-}
 
 function argmin(xs) {
   let best = 0;

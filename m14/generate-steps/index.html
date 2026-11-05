@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Генерация по шагам</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 6px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+#count { font-size: 13px; color: var(--yellow); }
+.tokens { display: flex; flex-wrap: wrap; gap: 3px; font-size: 12.5px; line-height: 1.2; }
+.tok { padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); white-space: pre; opacity: .55; }
+.tok.prompt { border-style: dashed; }
+.tok.win { opacity: 1; border-color: var(--cyan); }
+.tok.new { opacity: 1; color: var(--green); }
+.tok.cyc { background: rgba(249, 115, 22, .34); }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.sw { display: inline-block; width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; border: 1px solid var(--line); border-radius: 3px; }
+.sw.win { border-color: var(--cyan); }
+.sw.cyc { background: rgba(249, 115, 22, .45); }
+.sw.prompt { border-style: dashed; }
+.lg-new { color: var(--green); }
+#win { margin: 0 0 4px; font-size: 12.5px; }
+.bars { display: grid; grid-template-columns: max-content minmax(80px, 1fr) max-content; gap: 3px 8px; align-items: center; font-size: 12.5px; }
+.bars .bar { height: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.bars .bar span { display: block; height: 100%; background: var(--purple); }
+.bars .chosen { color: var(--green); }
+.bars .bar.chosen span { background: var(--green); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 14 · уроки 14.1, 14.3 и 14.4</p>
+<h1>Генерация по шагам</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="muted-label">промт:</span><span class="row" id="prompts"></span></div>
+  <div class="row"><button type="button" id="step">шаг</button><button type="button" class="btn-play" id="play">▶ по шагам</button>
+    <button type="button" id="more">+20 токенов</button><button type="button" id="reset">сначала</button><span class="mono" id="count"></span></div>
+</div>
+<div class="panel">
+  <div class="tokens mono" id="tokens"></div>
+  <p class="legend"><span><span class="sw prompt"></span>промт</span><span><span class="sw win"></span>окно: модель видит только его</span>
+    <span class="lg-new">новый токен</span><span><span class="sw cyc"></span>круг</span><span>«·» - пробел, «↵» - перенос строки</span></p>
+</div>
+<div class="panel" id="next-panel">
+  <p class="mono" id="win"></p>
+  <div class="bars mono" id="top"></div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Модель - train.py урока 14.2 (рассказ про Барсика, 50 эпох), записана заранее. У вас после обучения тексты будут другими.</p>
+
+<script type="module">
+import { LOOP_KEY, N_STEPS, captionText, parsePrompt, parseView, prompts, tokensView, topRows } from "./logic.js";
+import { el, presets, ready, stepPlayer } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const view = parseView(params.get("view") ?? "");
+const state = { key: view === "loop" ? LOOP_KEY : parsePrompt(params.get("prompt") ?? ""), k: view === "loop" ? N_STEPS : 0, view };
+const list = prompts();
+
+function render() {
+  const { key, k } = state;
+  $("tokens").replaceChildren(...tokensView(key, k).map((t) => el("span", {
+    class: `tok ${t.kind}${t.inWindow ? " win" : ""}${t.isNew ? " new" : ""}${t.inCycle ? " cyc" : ""}`,
+  }, t.label)));
+  const rows = topRows(key, k);
+  $("next-panel").hidden = rows.length === 0;
+  $("win").textContent = rows.length ? `шаг ${k + 1}: модель видит окно и выберет токен с наибольшей вероятностью (argmax)` : "";
+  $("top").replaceChildren(...rows.flatMap((r) => [
+    el("span", { class: r.chosen ? "chosen" : "" }, r.label),
+    el("span", { class: `bar${r.chosen ? " chosen" : ""}` }, el("span", { style: `width: ${r.p.startsWith("<") ? 0 : Math.min(100, 100 * Number(r.p))}%` })),
+    el("span", { class: r.chosen ? "chosen" : "" }, r.p)]));
+  $("count").textContent = `новых токенов: ${k} из ${N_STEPS}`;
+  $("caption").textContent = captionText(key, k, state.view);
+  $("step").disabled = $("more").disabled = $("play").disabled = k >= N_STEPS;
+}
+
+function go(k) {
+  state.k = Math.min(N_STEPS, k);
+  render();
+}
+
+const player = stepPlayer($("play"), {
+  steps: () => Array.from({ length: Math.min(N_STEPS, state.k + 20) - state.k }, (_, i) => state.k + i + 1),
+  onStep: (i, target) => { if (i >= 0) go(target); },
+});
+const chips = presets($("prompts"), list.map((p) => ({ label: p.text, value: p.key })), (key) => {
+  player.stop();
+  Object.assign(state, { key, k: 0, view: "" });
+  render();
+});
+$("step").addEventListener("click", () => { player.stop(); go(state.k + 1); });
+$("more").addEventListener("click", () => { player.stop(); go(state.k + 20); });
+$("reset").addEventListener("click", () => { player.stop(); go(0); });
+chips.setActive(list.findIndex((p) => p.key === state.key));
+render();
+ready();
+</script>
+</body>
+</html>

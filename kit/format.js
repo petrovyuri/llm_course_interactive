@@ -63,6 +63,20 @@ export function pForLoss(p) {
   return fixed(p, start + 5);
 }
 
+/** Токен GPT-2 для показа: пробел - «·», перевод строки - «↵», пустой - «∅»; длиннее 9 символов - 8 и «…». */
+export function tokenLabel(t) {
+  const s = t.replaceAll(" ", "·").replaceAll("\n", "↵") || "∅";
+  const chars = Array.from(s);
+  return chars.length > 9 ? chars.slice(0, 8).join("") + "…" : s;
+}
+
+/** Вероятность токена: 3 знака, меньше 0.01 - 4 знака, меньше 0.0001 - «<1e-4». */
+export function pText(p) {
+  if (p >= 0.01) return fixed(p, 3);
+  if (p >= 0.0001) return fixed(p, 4);
+  return "<1e-4";
+}
+
 /** Текст поля ввода → число (запятая допустима) или null, если это не число или |x| > limit. */
 export function parseNumber(text, limit) {
   const t = String(text).trim().replace(",", ".");
