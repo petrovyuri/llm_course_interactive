@@ -40,7 +40,7 @@
 - [Переставьте слова](https://petrovyuri.github.io/llm_course_interactive/m07/positions/) - урок «Positional Encoding»
 - [Формы и параметры](https://petrovyuri.github.io/llm_course_interactive/m07/shapes/) - урок «Код. Слои эмбеддингов»
 
-Модули 8-14 (механизм внимания, Multi-Head Attention, Feed-Forward Network, Transformer block, обучение и генерация текста): их демо открываются в уроках [курса на Stepik](https://stepik.org/a/276236).
+Модули 8-15 (механизм внимания, Multi-Head Attention, Feed-Forward Network, Transformer block, обучение, генерация текста и сэмплирование): их демо открываются в уроках [курса на Stepik](https://stepik.org/a/276236).
 
 ## Как это устроено
 

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Рулетка по вероятностям</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+button { padding: 4px 9px; font-size: 13px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.play { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+#wheel { width: 170px; height: 170px; flex: none; }
+#wheel text { font-size: 11px; font-family: inherit; fill: var(--bg); font-weight: 600; }
+#spin-g { transform-origin: 90px 90px; }
+#spin-g.anim { transition: transform 1.2s cubic-bezier(.2, .8, .2, 1); }
+.ctrl { display: grid; gap: 8px; flex: 1 1 260px; }
+#count { font-size: 13px; color: var(--yellow); }
+#last { font-size: 13px; }
+.tbl { display: grid; grid-template-columns: repeat(4, max-content) minmax(40px, 1fr); gap: 3px 10px; align-items: center; font-size: 12.5px; }
+.tbl .h { color: var(--muted); font-size: 12px; }
+.tbl .n { text-align: right; }
+.track { position: relative; height: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px 0 0 3px; }
+.track .mark { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--ink); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 420px) {
+  .tbl { gap: 3px 6px; font-size: 11.5px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 15 · урок 15.2</p>
+<h1>Рулетка по вероятностям</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel play">
+  <svg id="wheel" viewBox="0 0 180 180" role="img" aria-label="Рулетка: сектор каждого слова равен его вероятности">
+    <g id="spin-g"></g>
+    <path d="M90 2 L82 16 L98 16 Z" fill="var(--ink)" stroke="var(--bg)" stroke-width="1.5"></path>
+  </svg>
+  <div class="ctrl">
+    <div class="row"><button type="button" id="spin">крутить</button><button type="button" id="x10">×10</button>
+      <button type="button" id="x100">×100</button><button type="button" id="x1000">×1000</button><button type="button" id="reset">сначала</button></div>
+    <div class="mono" id="count"></div>
+    <div class="mono" id="last"></div>
+  </div>
+</div>
+<div class="panel">
+  <div class="tbl mono" id="tbl"></div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Вероятности - из урока 15.2. Белая черта на полоске - вероятность слова, цветная полоска - доля выпадений. Серия случайная, но с фиксированным seed: «сначала» повторяет её.</p>
+
+<script type="module">
+import { MAX, PROBS, WORDS, captionText, group, run, tableRows } from "./logic.js";
+import { el, ready, reducedMotion, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const COLORS = ["var(--cyan)", "var(--purple)", "var(--green)", "var(--orange)", "var(--yellow)"];
+const state = { n: 0, turns: 0 };
+const R = 80, C = 90;
+const pt = (frac, r) => [C + r * Math.sin(2 * Math.PI * frac), C - r * Math.cos(2 * Math.PI * frac)];
+
+function wheel() {
+  const nodes = [];
+  let cum = 0;
+  PROBS.forEach((p, i) => {
+    const [x1, y1] = pt(cum, R);
+    const [x2, y2] = pt(cum + p, R);
+    nodes.push(svg("path", { d: `M${C} ${C} L${x1.toFixed(2)} ${y1.toFixed(2)} A${R} ${R} 0 ${p > 0.5 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`,
+      fill: COLORS[i], stroke: "var(--bg)", "stroke-width": 1.5 }));
+    const [tx, ty] = pt(cum + p / 2, R * 0.62);
+    nodes.push(Object.assign(svg("text", { x: tx.toFixed(1), y: (ty - 2).toFixed(1), "text-anchor": "middle" }), { textContent: WORDS[i] }));
+    nodes.push(Object.assign(svg("text", { x: tx.toFixed(1), y: (ty + 11).toFixed(1), "text-anchor": "middle" }), { textContent: `${Math.round(100 * p)}%` }));
+    cum += p;
+  });
+  $("spin-g").replaceChildren(...nodes);
+}
+
+function render(animate) {
+  const { n } = state;
+  const r = run(n);
+  const g = $("spin-g");
+  g.classList.toggle("anim", animate && !reducedMotion);
+  g.style.transform = r.u === null ? "rotate(0deg)" : `rotate(${-(360 * 3 * state.turns + 360 * r.u)}deg)`;
+  $("count").textContent = `прокрутов: ${group(n)} из ${group(MAX)}`;
+  $("last").textContent = r.last === null ? "" : `последним выпало: «${WORDS[r.last]}»`;
+  $("tbl").replaceChildren(...["слово", "вероятность", "выпало", "доля", ""].map((h) => el("span", { class: "h" }, h)),
+    ...tableRows(n).flatMap((row, i) => [
+      el("span", { style: `color: ${COLORS[i]}` }, row.word), el("span", { class: "n" }, row.p),
+      el("span", { class: "n" }, group(row.count)), el("span", { class: "n" }, row.share),
+      el("span", { class: "track" }, el("span", { class: "fill", style: `width: ${(100 * Math.min(1, row.w)).toFixed(1)}%; background: ${COLORS[i]}` }),
+        el("span", { class: "mark", style: `left: ${(100 * PROBS[i]).toFixed(1)}%` })),
+    ]));
+  $("caption").textContent = captionText(n);
+  for (const id of ["spin", "x10", "x100", "x1000"]) $(id).disabled = n >= MAX;
+}
+
+function add(k) {
+  state.n = Math.min(MAX, state.n + k);
+  if (k === 1) state.turns += 1;
+  render(k === 1);
+}
+$("spin").addEventListener("click", () => add(1));
+$("x10").addEventListener("click", () => add(10));
+$("x100").addEventListener("click", () => add(100));
+$("x1000").addEventListener("click", () => add(1000));
+$("reset").addEventListener("click", () => { state.n = 0; state.turns = 0; render(false); });
+wheel();
+render(false);
+ready();
+</script>
+</body>
+</html>
