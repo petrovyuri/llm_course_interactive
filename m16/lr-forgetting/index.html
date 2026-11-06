@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Выучить и не забыть</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 4px; }
+.sliders { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 14px; }
+.sliders > div { flex: 1 1 240px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.nums .chip { min-width: 28px; padding: 2px 6px; font-size: 12px; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.charts h2 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.charts svg { display: block; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.legend .sw { display: inline-block; width: 16px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
+.stats { margin: 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.stats .ok { color: var(--green); }
+.stats .bad { color: var(--orange); }
+.stats .m { color: var(--muted); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .charts { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 16 · урок 16.6</p>
+<h1>Выучить и не забыть</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="lrs"></div>
+  <div class="sliders"><div id="ep"></div><span class="row"><span class="muted-label">вопрос:</span><span class="row nums" id="qs"></span></span></div>
+</div>
+<div class="panel">
+  <div class="charts">
+    <div><h2>верных ответов из 12</h2><svg id="acc" viewBox="0 0 330 112" role="img" aria-label="Верные ответы по эпохам"></svg></div>
+    <div><h2>loss на рассказе (логарифмическая шкала)</h2><svg id="story" viewBox="0 0 330 112" role="img" aria-label="Loss на рассказе по эпохам"></svg></div>
+  </div>
+  <p class="legend" id="legend"></p>
+</div>
+<div class="panel"><p class="stats mono" id="stats"></p></div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Повторный запуск дообучения с seed 42 от базы урока, поэтому числа немного отличаются от лога <code>finetune.py</code> в уроке: тот запуск был без seed.</p>
+
+<script type="module">
+import { EPOCHS, LRS, PAIRS, captionText, curve, state } from "./logic.js";
+import { el, presets, ready, slider, svg } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state0 = { lr: "1e-4", epoch: EPOCHS, qi: 0 };
+const st = state0;
+const COLOR = { "1e-5": "var(--green)", "1e-4": "var(--cyan)", "1e-3": "var(--orange)" };
+const LABEL = { "1e-5": "lr 1e-5", "1e-4": "lr 1e-4 (как в уроке)", "1e-3": "lr 1e-3" };
+const W = 330, H = 112, L = 30, R = 6, T = 6, B = 18;
+const x = (e) => L + (e / EPOCHS) * (W - L - R);
+const LOG_MIN = Math.log10(0.02), LOG_MAX = Math.log10(4);
+const Y = {
+  acc: (v) => T + (1 - v / 12) * (H - T - B),
+  story: (v) => T + (1 - (Math.log10(v) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * (H - T - B),
+};
+const TICKS = { acc: [[0, "0"], [6, "6"], [12, "12"]], story: [[0.03, "0.03"], [0.1, "0.1"], [1, "1"]] };
+
+function chart(box, metric) {
+  const y = Y[metric];
+  const nodes = [];
+  for (const [v, t] of TICKS[metric]) {
+    nodes.push(svg("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "var(--line)", "stroke-width": 1 }));
+    const label = svg("text", { x: L - 4, y: y(v) + 3, "text-anchor": "end", fill: "var(--muted)", "font-size": 9 });
+    label.textContent = t;
+    nodes.push(label);
+  }
+  for (const e of [0, 100, 200]) {
+    const label = svg("text", { x: x(e), y: H - 4, "text-anchor": e === EPOCHS ? "end" : "middle", fill: "var(--muted)", "font-size": 9 });
+    label.textContent = e === EPOCHS ? "200 эпох" : String(e);
+    nodes.push(label);
+  }
+  for (const lr of LRS) {
+    const points = curve(lr, metric).map(([e, v]) => `${x(e).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const on = lr === st.lr;
+    nodes.push(svg("polyline", { points, fill: "none", stroke: COLOR[lr], "stroke-width": on ? 2.4 : 1.1, opacity: on ? 1 : 0.5 }));
+  }
+  if (metric === "acc") {
+    const points = curve(st.lr, "start").map(([e, v]) => `${x(e).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    nodes.push(svg("polyline", { points, fill: "none", stroke: COLOR[st.lr], "stroke-width": 1.4, "stroke-dasharray": "4 3" }));
+  }
+  nodes.push(svg("line", { x1: x(st.epoch), x2: x(st.epoch), y1: T, y2: H - B, stroke: "var(--yellow)", "stroke-dasharray": "3 3" }));
+  box.replaceChildren(...nodes);
+}
+
+function render() {
+  chart($("acc"), "acc");
+  chart($("story"), "story");
+  const s = state(st.lr, st.epoch, st.qi);
+  $("stats").replaceChildren(
+    el("span", { class: "m" }, `эпоха ${st.epoch}: `), `loss обучения ${s.train} · верны ${s.acc} из 12 (начало верно у ${s.start}) · loss на рассказе ${s.story}\n`,
+    el("span", { class: "m" }, `${PAIRS[st.qi][0]} → `), el("span", { class: s.right ? "ok" : "bad" }, s.answer || "пустой ответ"),
+    el("span", { class: "m" }, s.right ? " (верно)" : ` (верно: ${PAIRS[st.qi][1]})`), "\n",
+    el("span", { class: "m" }, "The cat was → "), s.continuation);
+  $("caption").textContent = captionText(st.lr, st.epoch, st.qi);
+}
+
+$("legend").replaceChildren(...LRS.map((lr) => el("span", {}, el("span", { class: "sw", style: `background: ${COLOR[lr]}` }), LABEL[lr])),
+  el("span", {}, "пунктир - ответов с верным началом"));
+presets($("lrs"), LRS.map((lr) => ({ label: LABEL[lr], value: lr })), (lr) => {
+  st.lr = lr;
+  render();
+}).setActive(LRS.indexOf(st.lr));
+slider($("ep"), { label: "эпоха", min: 0, max: EPOCHS, step: 1, value: st.epoch, format: String, onInput: (v) => { st.epoch = v; render(); } });
+presets($("qs"), PAIRS.map((p, i) => ({ label: String(i + 1), value: i })), (i) => {
+  st.qi = i;
+  render();
+}).setActive(0);
+$("qs").querySelectorAll("button").forEach((b, i) => b.setAttribute("title", PAIRS[i][0]));
+render();
+ready();
+</script>
+</body>
+</html>

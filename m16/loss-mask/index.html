@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Маска -100 по токенам</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 5px; }
+.pairs .chip { min-width: 30px; padding: 2px 6px; font-size: 12px; }
+.qa { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.scroll { max-height: 252px; overflow-y: auto; scrollbar-gutter: stable; }
+.tbl { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr) max-content max-content; gap: 0 10px; font-size: 11.5px; line-height: 1.35; align-items: baseline; }
+.tbl .h { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+.tbl .n { text-align: right; }
+.tbl .off { color: var(--muted); opacity: .6; }
+.tbl .on { color: var(--green); }
+.tbl .tok { white-space: pre; }
+.loss { margin: 5px 0 0; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.marks { display: grid; grid-template-columns: max-content 1fr; gap: 4px 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
+.marks .row { gap: 3px; }
+.mark { min-width: 24px; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; text-align: center; color: var(--muted); }
+.mark.q { border-color: var(--orange); color: var(--orange); }
+.mark.sel { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.cont { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 12px; line-height: 1.35; }
+.cont h2 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; color: var(--cyan); }
+.cont p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cont .a { color: var(--green); }
+.cont .q { color: var(--orange); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .tbl { gap: 1px 6px; font-size: 11px; }
+  .cont { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 16 · урок 16.4</p>
+<h1>Маска -100 по токенам</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row"><span class="row" id="tabs"></span><span class="row" id="models"></span><span class="row" id="masks"></span></div>
+  <div class="row pairs" id="pairs"></div>
+  <p class="qa" id="qa"></p>
+</div>
+<div class="panel" id="table">
+  <div class="scroll"><div class="tbl mono" id="tbl"></div></div>
+  <p class="loss mono" id="loss"></p>
+</div>
+<div class="panel" id="nomask" hidden>
+  <div class="marks" id="marks"></div>
+  <div class="cont mono">
+    <div><h2>с маской</h2><p id="cm"></p></div>
+    <div><h2>без маски</h2><p id="cu"></p></div>
+  </div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note" id="note">Модели модуля 16. Ошибка на позиции - cross-entropy: -ln p правильного следующего токена.</p>
+
+<script type="module">
+import { PAIRS, captionText, lossLine, noMaskRows, rows } from "./logic.js";
+import { el, presets, ready } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const state = { tab: "table", pi: 0, model: "base", masked: true };
+const HEAD = ["токен", "метка", "что учим", "ошибка", "p"];
+
+function render() {
+  const table = state.tab === "table";
+  $("table").hidden = !table;
+  $("nomask").hidden = table;
+  $("models").hidden = !table;
+  $("masks").hidden = !table;
+  $("qa").textContent = `вопрос: ${PAIRS[state.pi][0]} · ответ: ${PAIRS[state.pi][1]}`;
+  if (table) {
+    $("tbl").replaceChildren(...HEAD.map((h) => el("span", { class: "h" }, h)),
+      ...rows(state.pi, state.model, state.masked).flatMap((r) => {
+        const c = r.counted ? "on" : "off";
+        return [el("span", { class: `tok ${c}` }, r.label), el("span", { class: `n ${c}` }, r.labelText),
+          el("span", { class: c }, r.what), el("span", { class: `n ${c}` }, r.ce), el("span", { class: `n ${c}` }, r.p)];
+      }));
+    $("loss").textContent = lossLine(state.pi, state.model, state.masked);
+  } else {
+    const all = noMaskRows();
+    const line = (key, label) => [el("span", { class: "muted" }, label), el("span", { class: "row" },
+      ...all.map((r, i) => el("span", { class: `mark${r[key].writesAnswer ? " q" : ""}${i === state.pi ? " sel" : ""}` }, String(i + 1))))];
+    $("marks").replaceChildren(...line("masked", "с маской"), ...line("unmasked", "без маски"));
+    const show = (box, r) => box.replaceChildren(el("span", { class: "a" }, r.answer), " ", el("span", { class: r.writesAnswer ? "q" : "" }, r.after));
+    show($("cm"), all[state.pi].masked);
+    show($("cu"), all[state.pi].unmasked);
+  }
+  $("note").textContent = table ? "Модели модуля 16. Ошибка на позиции - cross-entropy: -ln p правильного следующего токена."
+    : "Обе модели дообучены от базы урока с seed 42, lr 1e-4, 200 эпох. Оранжевым - продолжения, где модель сама дописывает «Answer».";
+  $("caption").textContent = captionText(state.tab, state.pi, state.model, state.masked);
+}
+
+presets($("tabs"), [{ label: "таблица", value: "table" }, { label: "обучили без маски", value: "nomask" }], (v) => {
+  state.tab = v;
+  render();
+}).setActive(0);
+presets($("models"), [{ label: "до дообучения", value: "base" }, { label: "после", value: "chat" }], (v) => {
+  state.model = v;
+  render();
+}).setActive(0);
+presets($("masks"), [{ label: "маска вкл", value: true }, { label: "маска выкл", value: false }], (v) => {
+  state.masked = v;
+  render();
+}).setActive(0);
+const pairs = presets($("pairs"), PAIRS.map((p, i) => ({ label: String(i + 1), value: i })), (v) => {
+  state.pi = v;
+  render();
+});
+pairs.setActive(0);
+$("pairs").querySelectorAll("button").forEach((b, i) => b.setAttribute("title", PAIRS[i][0]));
+render();
+ready();
+</script>
+</body>
+</html>

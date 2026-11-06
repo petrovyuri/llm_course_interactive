@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Спросите обе модели</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+[hidden] { display: none !important; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.top { display: grid; gap: 5px; }
+.muted-label { color: var(--muted); font-size: 13px; }
+.qs { display: flex; flex-wrap: wrap; gap: 3px; max-height: 84px; overflow-y: auto; }
+.qs .chip { font-size: 12px; padding: 2px 7px; }
+.prompt { margin: 0; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cols h2 { margin: 0 0 3px; font-size: 13px; font-weight: 600; color: var(--cyan); }
+.tokens { display: flex; flex-wrap: wrap; gap: 3px; font-size: 12px; line-height: 1.15; }
+.tok { display: inline-grid; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); text-align: center; }
+.tok b { font-weight: 400; white-space: pre; }
+.tok small { color: var(--muted); font-size: 10.5px; }
+.tok.eos { border-color: var(--orange); color: var(--orange); }
+.empty { color: var(--orange); font-size: 12.5px; }
+.rows { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; font-size: 12.5px; }
+.rows .p { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rows .bad { color: var(--orange); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .cols { grid-template-columns: 1fr; }
+  .rows { grid-template-columns: minmax(0, 1fr); gap: 0 10px; }
+  .rows > span:nth-child(even) { margin-bottom: 4px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 16 · уроки 16.1, 16.3 и 16.6</p>
+<h1 id="title">Спросите обе модели</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel top">
+  <div class="row" id="groups"></div>
+  <div class="qs" id="qs"></div>
+  <div class="row" id="opts"><span class="row" id="templates"></span><span class="row" id="stops"></span></div>
+</div>
+<div class="panel">
+  <p class="prompt mono" id="prompt"></p>
+  <div class="cols" id="cols">
+    <div><h2>База (best_model.pth)</h2><div class="tokens mono" id="base"></div></div>
+    <div><h2>Дообученная (chat_model.pth)</h2><div class="tokens mono" id="chat"></div></div>
+  </div>
+  <div class="rows mono" id="rows" hidden></div>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note" id="note">Модели модуля 16: те же веса, что дали вывод уроков. Greedy, до 20 токенов; под токеном - его вероятность.</p>
+
+<script type="module">
+import { TEMPLATE_KEYS, answerView, captionText, parseView, promptText, questionList, templateRows } from "./logic.js";
+import { el, presets, ready } from "../../kit/ui.js";
+import { pText } from "../../kit/format.js";
+
+const $ = (id) => document.getElementById(id);
+const view = parseView(new URLSearchParams(location.search).get("view") ?? "");
+const GROUPS = view === "template" ? [["train", "обучающие вопросы"]]
+  : [["train", "обучающие"], ["rephrase", "другими словами"], ["offtopic", "не по теме"]];
+const TEMPLATE_LABEL = { trained: "как учили", nonl: "без ↵", qa: "Q: / A:", lower: "строчными", bare: "только вопрос" };
+const state = { group: "train", qi: 0, template: "trained", stop: true };
+const all = questionList(view);
+
+function tokenRow(box, a) {
+  if (a.empty) {
+    box.replaceChildren(el("span", { class: "tok eos" }, el("b", {}, "EOS"), el("small", {}, pText(a.eosP))),
+      el("span", { class: "empty" }, " пустой ответ: первым токеном сразу EOS"));
+    return;
+  }
+  const shown = a.tokens.map((t) => el("span", { class: `tok${t.eos ? " eos" : ""}` }, el("b", {}, t.label), el("small", {}, pText(t.p))));
+  if (a.eosP !== null) shown.push(el("span", { class: "tok eos" }, el("b", {}, "EOS"), el("small", {}, pText(a.eosP))));
+  box.replaceChildren(...shown);
+}
+
+function renderQuestions() {
+  const items = all.filter((x) => x.group === state.group);
+  $("qs").replaceChildren(...items.map((x) => el("button", {
+    type: "button", class: "chip", "aria-pressed": String(x.index === state.qi),
+    onclick: () => { state.qi = x.index; render(); },
+  }, x.q)));
+}
+
+function render() {
+  renderQuestions();
+  const t = view === "full" ? state.template : "trained";
+  $("prompt").textContent = view === "template" ? `вопрос: ${all.find((x) => x.index === state.qi).q}`
+    : `промпт: ${promptText(state.qi, t).replaceAll("\n", "↵")}`;
+  if (view === "template") {
+    $("rows").replaceChildren(...templateRows(state.qi).flatMap((r) => [
+      el("span", { class: "p" }, r.prompt),
+      el("span", { class: r.empty || r.text !== templateRows(state.qi)[0].text ? "bad" : "" }, r.empty ? "пустой ответ" : r.text),
+    ]));
+  } else {
+    tokenRow($("base"), answerView(state.qi, t, "base", true));
+    tokenRow($("chat"), answerView(state.qi, t, "chat", view === "full" ? state.stop : true));
+  }
+  $("caption").textContent = captionText(view, state.qi, state.template, state.stop);
+}
+
+const groups = presets($("groups"), GROUPS.map(([value, label]) => ({ label, value })), (g) => {
+  state.group = g;
+  state.qi = all.find((x) => x.group === g).index;
+  render();
+});
+groups.setActive(0);
+if (view === "full") {
+  presets($("templates"), TEMPLATE_KEYS.map((k) => ({ label: TEMPLATE_LABEL[k], value: k })), (k) => {
+    state.template = k;
+    render();
+  }).setActive(0);
+  presets($("stops"), [{ label: "стоп на EOS", value: true }, { label: "без стопа", value: false }], (v) => {
+    state.stop = v;
+    render();
+  }).setActive(0);
+} else {
+  $("opts").hidden = true;
+}
+if (view === "template") {
+  $("title").textContent = "Шаблон промпта решает";
+  $("groups").hidden = true;
+  $("qs").style.maxHeight = "none";
+  $("cols").hidden = true;
+  $("rows").hidden = false;
+  $("note").textContent = "Дообученная модель модуля 16, greedy. Оранжевым - ответ, который отличается от ответа с шаблоном урока.";
+}
+render();
+ready();
+</script>
+</body>
+</html>
