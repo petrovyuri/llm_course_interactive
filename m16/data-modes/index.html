@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Три набора данных</title>
+<link rel="stylesheet" href="../../kit/kit.css">
+<style>
+h1 { margin-bottom: 6px; }
+.panel { padding: 8px 10px; margin-bottom: 6px; }
+.chip { font-size: 12.5px; }
+.sum { display: grid; grid-template-columns: repeat(6, max-content); gap: 1px 16px; font-size: 12px; }
+.sum .h { color: var(--muted); }
+.sum .n { text-align: right; }
+.scroll { max-height: 240px; overflow-y: auto; scrollbar-gutter: stable; margin-top: 6px; }
+.tbl { display: grid; grid-template-columns: minmax(0, 1.15fr) repeat(3, minmax(0, 1fr)); gap: 2px 8px; font-size: 11.5px; line-height: 1.3; }
+.tbl .h { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+.tbl span { overflow-wrap: anywhere; }
+.tbl .g { color: var(--muted); font-size: 10.5px; }
+.tbl .right { color: var(--green); }
+.tbl .wrong { color: var(--orange); }
+.tbl .dontknow { color: var(--yellow); }
+.tbl .dontknow.good { color: var(--green); }
+.tbl .cost { outline: 1px solid var(--orange); outline-offset: 1px; border-radius: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 5px 0 0; font-size: 12px; color: var(--muted); }
+.legend .right { color: var(--green); }
+.legend .wrong { color: var(--orange); }
+.legend .dontknow { color: var(--yellow); }
+.note { margin: 4px 0 0; font-size: 12.5px; }
+@media (max-width: 520px) {
+  .sum { gap: 1px 8px; font-size: 11px; }
+  .tbl { grid-template-columns: minmax(0, 1.1fr) repeat(3, minmax(0, 1fr)); gap: 2px 5px; font-size: 10.5px; }
+}
+</style>
+</head>
+<body>
+<p class="eyebrow">Модуль 16 · урок 16.6</p>
+<h1>Три набора данных</h1>
+<noscript><div class="panel">Демо не запустилось. Откройте его в отдельной вкладке.</div></noscript>
+
+<div class="panel">
+  <div class="row" id="groups"></div>
+</div>
+<div class="panel">
+  <div class="sum mono" id="sum"></div>
+  <div class="scroll"><div class="tbl" id="tbl"></div></div>
+  <p class="legend"><span class="right">верно</span><span class="wrong">неверно</span><span class="dontknow">«не знаю»</span><span>зелёным «не знаю» - где ответа в рассказе нет</span></p>
+</div>
+<p class="caption" id="caption" aria-live="polite"></p>
+<p class="muted note">Три дообучения <code>demo_improve.py</code> от базы урока: seed 42, lr 1e-4, 200 эпох. Итог совпадает с таблицей урока.</p>
+
+<script type="module">
+import { GROUP_KEYS, MODES, captionText, rows, summary } from "./logic.js";
+import { el, presets, ready } from "../../kit/ui.js";
+
+const $ = (id) => document.getElementById(id);
+const LABEL = { all: "все", train: "обучающие", second: "вторая формулировка", rephrase: "новый перефраз", offtopic: "не по теме", refusal: "отказы из C" };
+const GROUP_SHORT = { train: "обучающая", second: "вторая формулировка", rephrase: "новый перефраз", offtopic: "не по теме", refusal: "отказ из набора C" };
+const PAIRS = { A: 12, B: 24, C: 28 };
+let group = "all";
+
+function renderSummary() {
+  const s = summary();
+  const head = ["режим", "пар", "обучающие", "вторая", "перефраз", "отказы"];
+  $("sum").replaceChildren(...head.map((h) => el("span", { class: "h" }, h)),
+    ...MODES.flatMap((m) => [el("span", {}, m), el("span", { class: "n" }, String(PAIRS[m])),
+      el("span", { class: "n" }, `${s.train[m]}/12`), el("span", { class: "n" }, `${s.second[m]}/12`),
+      el("span", { class: "n" }, `${s.rephrase[m]}/12`), el("span", { class: "n" }, `${s.refusals[m]}/2`)]));
+}
+
+function render() {
+  $("tbl").replaceChildren(...["вопрос", "A (12 пар)", "B (24 пары)", "C (28 пар)"].map((h) => el("span", { class: "h" }, h)),
+    ...rows(group).flatMap((r) => [
+      el("span", {}, r.q, group === "all" ? el("span", { class: "g" }, ` · ${GROUP_SHORT[r.group]}`) : ""),
+      ...MODES.map((m) => {
+        const c = r.cells[m];
+        return el("span", { class: `${c.verdict}${c.good ? " good" : ""}${m === "C" && r.cost ? " cost" : ""}` }, c.text);
+      })]));
+  $("caption").textContent = captionText(group);
+}
+
+presets($("groups"), GROUP_KEYS.map((g) => ({ label: LABEL[g], value: g })), (g) => {
+  group = g;
+  render();
+}).setActive(0);
+renderSummary();
+render();
+ready();
+</script>
+</body>
+</html>
